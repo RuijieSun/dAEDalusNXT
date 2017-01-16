@@ -1,10 +1,3 @@
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% 
-% Authors: Klaus Seywald (klaus.seywald@mytum.de) 
-%          and Simon Binder (simon.binder@tum.de)
-% 
-% This file is part of dAEDalusNXT (https://github.com/seyk86/dAEDalusNXT)
-%
 function [rho,a,temp,press,kvisc,ZorH]=stdatmo(H_in,Toffset,Units,GeomFlag)
 %  STDATMO Find gas properties in earth's atmosphere.
 %   [rho,a,T,P,nu,ZorH]=STDATMO(H,dT,Units,GeomFlag)
@@ -29,11 +22,11 @@ function [rho,a,temp,press,kvisc,ZorH]=stdatmo(H_in,Toffset,Units,GeomFlag)
 %   dK/dR = 5/9). Units are as follows:
 %       Input:                        SI (default)    US
 %           H:     Altitude           m               ft
-%           dT:    Temp. offset       �C/�K           �F/�R
+%           dT:    Temp. offset       °C/°K           °F/°R
 %       Output:
 %           rho:   Density            kg/m^3          slug/ft^3
 %           a:     Speed of sound     m/s             ft/s
-%           T:     Temperature        �K              �R
+%           T:     Temperature        °K              °R
 %           P:     Pressure           Pa              lbf/ft^2
 %           nu:    Kinem. viscosity   m^2/s           ft^2/s
 %           ZorH:  Height or altitude m               ft
@@ -56,7 +49,7 @@ function [rho,a,temp,press,kvisc,ZorH]=stdatmo(H_in,Toffset,Units,GeomFlag)
 %
 %   Example 1: Find atmospheric properties at every 100 m of geometric
 %   height for an off-standard atmosphere with temperature offset varying
-%   +/- 25�C sinusoidally with a period of 4 km.
+%   +/- 25°C sinusoidally with a period of 4 km.
 %       Z = 0:100:86000;
 %       [rho,a,T,P,nu,H]=stdatmo(Z,25*sin(pi*Z/2000),'',true);
 %       semilogx(rho/stdatmo,H/1000)
@@ -64,8 +57,8 @@ function [rho,a,temp,press,kvisc,ZorH]=stdatmo(H_in,Toffset,Units,GeomFlag)
 %       xlabel('\sigma'); ylabel('Altitude (km)')
 %
 %   Example 2: Create tables of atmospheric properties up to 30000 ft for a
-%   cold (-15�C), standard, and hot (+15�C) day with columns
-%   [h(ft) Z(ft) rho(slug/ft3) sigma a(ft/s) T(R) P(psf) �(slug/ft-s) nu(ft2/s)]
+%   cold (-15°C), standard, and hot (+15°C) day with columns
+%   [h(ft) Z(ft) rho(slug/ft3) sigma a(ft/s) T(R) P(psf) µ(slug/ft-s) nu(ft2/s)]
 %   using 3-dimensional array inputs.
 %       [~,h,dT]=meshgrid(0,-5000:1000:30000,-15:15:15);
 %       [rho,a,T,P,nu,Z]=stdatmo(h,dT*9/5,'US',0);
@@ -149,7 +142,7 @@ if nargin <= 2 && all(H_in(:) <= 11000) %quick troposphere-only code
 end
 
 % index   Lapse rate   Base Temp     Base Geopo Alt        Base Pressure
-%   i      Ki (�C/m)    Ti (�K)         Hi (m)              P (Pa)
+%   i      Ki (°C/m)    Ti (°K)         Hi (m)              P (Pa)
 D =[1       -.0065      288.15          0                   101325
     2       0           216.65          11000               22632.0400950078
     3       .001        216.65          20000               5474.87742428105
@@ -168,8 +161,8 @@ RE=6356766;     %Radius of the Earth, m
 Bs = 1.458e-6;  %N-s/m2 K1/2
 S = 110.4;      %K
 
-K=D(:,2);	%�K/m
-T=D(:,3);	%�K
+K=D(:,2);	%°K/m
+T=D(:,3);	%°K
 H=D(:,4);	%m
 P=D(:,5);	%Pa
 
@@ -394,7 +387,7 @@ V3.1    27 August 2010
 V3.2    23 December 2010
 	Minor changes, tested on R2010a, and sinusoidal example added
 V4.0    6 July 2011
-	Imperial temp offset now �F/�R instead of �C/�K
+	Imperial temp offset now °F/°R instead of °C/°K
 V4.1    12 Sep 2012
 	Added ZorH output support for quick troposphere calculation
  	uploaded
