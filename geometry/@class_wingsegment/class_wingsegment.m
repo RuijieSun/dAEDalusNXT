@@ -2065,5 +2065,13 @@ classdef class_wingsegment
                 fprintf('Unknown Data Format');
             end
         end
+        function obj=  computeControlSurfacePanelIds(obj)
+            if obj.has_te_cs
+                obj.te_device.panelIds=zeros(1,obj.n_span*obj.n_te_panels);
+                for iSpan=1:obj.n_span
+                    obj.te_device.panelIds((iSpan-1)*obj.n_te_panels+1:(iSpan)*obj.n_te_panels)= ( obj.panel_start_idx+iSpan*obj.n_chord+(iSpan-1)*obj.n_te_panels:obj.panel_start_idx-1+iSpan*obj.n_chord+(iSpan)*obj.n_te_panels);
+                end
+            end
+        end
     end
 end
