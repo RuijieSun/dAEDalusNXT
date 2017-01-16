@@ -243,6 +243,8 @@ classdef class_UVLM_solver
         v_ind;
         %state space model valid for one velocity
         sys;
+        %state space model valid for one velocity with vn dot as input
+        sysvn
         %lpv state space model valid for all speeds
         lpvSys;
         max_gust_loads;
@@ -4207,7 +4209,7 @@ classdef class_UVLM_solver
             
             fclose(fileID);
         end
-        function obj=generate_state_space_matrices(obj,Vref,omega)
+        function obj=generate_state_space_matrices(obj,Vref,t_step)
             %this function generates the state space matrices for a
             %continuous time state space model
             %input vector is Vn and Vndot, (normal velocities on
@@ -4215,7 +4217,8 @@ classdef class_UVLM_solver
             %output is Gammab, Gammabdot,vsindx vsindy vsindz (induced
             %velocity on segments)
             
-            obj=obj.f_compute_timestep(omega);
+%             obj=obj.f_compute_timestep(omega);
+            obj.t_step=t_step;
             
             %first the grid needs to be initialized
             obj=obj.initialize_unsteady_computation();
@@ -4234,8 +4237,8 @@ classdef class_UVLM_solver
             
             %the grid needs to be modified (small first wake panel)
             obj.grid_wake(1,:)=obj.grid_wake(1,:)-xW*0.25;
-            obj.grid_wake(1,nS+2+1:end)=obj.grid_wake(1,nS+2+1:end)-xW*0.75;
-            obj.grid_vring(1,nC+2:nC+2:end)=obj.grid_vring(1,nC+2:nC+2:end)-0.25*xW;
+            obj.grid_wake(1,obj.row_length+1:end)=obj.grid_wake(1,obj.row_length+1:end)-xW*0.75;
+            obj.grid_vring(1,unique(obj.panels(3:4,find(obj.is_te))))=obj.grid_vring(1,unique(obj.panels(3:4,find(obj.is_te))))-0.25*xW;
             obj=obj.compute_influence_coeff_matrix();
 
             % number of ALL wake panels
@@ -4295,7 +4298,7 @@ classdef class_UVLM_solver
             %restore original grid
             obj=obj.initialize_unsteady_computation();
         end 
-        function obj=generate_reduced_parameter_varying_ssm(obj,nOrder,omega)
+        function obj=generate_reduced_parameter_varying_ssm(obj,nOrder,t_step)
             % this function creates the ssm and the matrices to make it an parameter varying ssm which is valid for all speeds
             %therefore a and b need to be multiplied with the actual
             %velocity
@@ -4306,7 +4309,7 @@ classdef class_UVLM_solver
             %d_res=V*(df+df2)*d
             %for nOrder==0 no reduction will be carried out
             %create state space for unit velocity
-            obj=obj.generate_state_space_matrices(1,omega);
+            obj=obj.generate_state_space_matrices(1,t_step);
             %reduce state space model
             if nOrder~=0
                 obj.sys=balred(obj.sys,nOrder);
@@ -4323,6 +4326,89 @@ classdef class_UVLM_solver
             obj.lpvSys.dF=[zeros(nB) zeros(nB); ones(nB) zeros(nB); zeros(3*nB,2*nB)];
             obj.lpvSys.dF2=(obj.lpvSys.dF==0);
         end
+        function obj=generate_state_space_matrices_vn(obj,Vref,t_step)
+            %this function generates the state space matrices for a
+            %continuous time state space model
+            %input vector is Vndot, (normal velocities on
+            %collocation point)
+            %output is panel force
+            
+%             obj=obj.f_compute_timestep(omega);
+            obj.t_step=t_step;
+            
+            %first the grid needs to be initialized
+            obj=obj.initialize_unsteady_computation();
+            
+            
+            %number of spanwise panels
+            nS=sum(obj.is_te);
+            %number of chordwise panels
+            nC=length(obj.Abb)/nS;
+            %number of bound panels
+            nB=nC*nS;
+            %xW describes the spacing of the wake grid
+            xW=obj.grid_wake(1,obj.panels_wake(1,1+nS))-obj.grid_wake(1,obj.panels_wake(1,1));
+            
+            
+            
+            %the grid needs to be modified (small first wake panel)
+            obj.grid_wake(1,:)=obj.grid_wake(1,:)-xW*0.25;
+            obj.grid_wake(1,obj.row_length+1:end)=obj.grid_wake(1,obj.row_length+1:end)-xW*0.75;
+            obj.grid_vring(1,unique(obj.panels(3:4,find(obj.is_te))))=obj.grid_vring(1,unique(obj.panels(3:4,find(obj.is_te))))-0.25*xW;
+            obj=obj.compute_influence_coeff_matrix();
+
+            % number of ALL wake panels
+            nW=size(obj.Abw,2);
+            % number of REST wake panels
+            nWR=nW-nS;
+            
+            %K1 is the influence coefficients of bound on bound panels
+            K1=-obj.Abb;
+            %K2 is the influence coefficients of small first wake row on bound
+            K2=-obj.Abw(:,1:nS);
+            %K3 is the influence coefficients of wake on bound
+            K3=-obj.Abw(:,nS+1:end);
+            %K4 maps all body gamma to vector of gammas of last row
+            K4=diag(obj.is_te)'*1;
+            K4(all(K4==0,2),:)=[];
+            %K5 is an eye matrix of the number of spanwise panels 
+            K5=-eye(nS); 
+            %K6 is transport within rest wake
+            K6=([zeros(nS,nWR) ;eye(nWR-nS) zeros(nWR-nS,nS)]-eye(nWR))*Vref/xW;
+            %K7 is transport within first wake row
+            K7=[eye(nS); zeros(nWR-nS,nS)]*Vref/xW;
+            %
+            K8=+K6+K7*(K5-K4*K1^-1*K2)^-1*K4*K1^-1*K3;
+            K9=-K7*(K5-K4*K1^-1*K2)^-1*K4*K1^-1;
+            
+            l=((0.75*obj.grid(:,obj.panels(2,:))+0.25*obj.grid(:,obj.panels(3,:)))-(0.75*obj.grid(:,obj.panels(1,:))+0.25*obj.grid(:,obj.panels(4,:))))';
+            crossProduct1=cross(repmat(obj.Uinf,nB,1),l);
+            crossProduct2=(crossProduct1./repmat(sum(crossProduct1,2),1,3));
+            %currently only z force being output
+            factor1=obj.state.rho_air.*[crossProduct1(:,1); crossProduct1(:,2); crossProduct1(:,3)];
+            factor2=obj.state.rho_air*([crossProduct2(:,1).*obj.area'; crossProduct2(:,2).*obj.area'; crossProduct2(:,3).*obj.area']);
+            L1=([zeros(1,nB); -diag(~obj.is_te(1:end-1)') zeros(nB-1,1)]+ eye(nB,nB));
+            L2=(1/2*([zeros(1,nB); diag(~obj.is_te(1:end-1)') zeros(nB-1,1)]+ eye(nB,nB)));
+            L1=blkdiag(L1,L1,L1).*repmat(factor1,1,3*nB);
+            L2=blkdiag(L2,L2,L2).*repmat(factor2,1,3*nB);
+
+            L3=-(K1-K2*K5^-1*K4)^-1*K3;
+            L4=(K1-K2*K5^-1*K4)^-1;
+            L5=L1*repmat(L3,3,1)+L2*repmat(L3*K8,3,1);
+            L6=L1*repmat(L4,3,1)+L2*repmat(L3*K9,3,1);
+            L7=L2*repmat(L4,3,1);
+            
+            Ass=[K8 K9; zeros(nB,nWR+nB)];
+            Bss=[zeros(nWR,nB); eye(nB)];
+            Css=[L5 L6;];
+            Dss=L7;
+            obj.sysvn=ss(Ass,Bss,Css,Dss);
+            obj.sysvn.StateName=[cellstr([repmat('wakeVort_',nWR,1) num2str([1:nWR]','%04d')]);cellstr([repmat('normV_',nB,1) num2str([1:nB]','%04d')])];
+            obj.sysvn.InputName=cellstr([repmat('normVdot_',nB,1) num2str([1:nB]','%04d')]);
+            obj.sysvn.OutputName=[cellstr([repmat('panelForceX_',nB,1) num2str([1:nB]','%04d')]);cellstr([repmat('panelForceY_',nB,1) num2str([1:nB]','%04d')]);cellstr([repmat('panelForceZ_',nB,1) num2str([1:nB]','%04d')])];
+            %restore original grid
+            obj=obj.initialize_unsteady_computation();
+        end 
     end
     
 end

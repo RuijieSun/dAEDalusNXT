@@ -89,7 +89,7 @@ void compute_influence_vring3D(double *grid,double *panels, double *colloc,doubl
 					r02=*(vortex+1)-*(vortex+i*3+1);
 					r03=*(vortex+2)-*(vortex+i*3+2);
                 
-					//beim Segment 4 also i ==3 wird f�r forCoredist2 der 1. und der 2. Wirbelpunkt verwendet
+					//beim Segment 4 also i ==3 wird für forCoredist2 der 1. und der 2. Wirbelpunkt verwendet
 					forCoredist21=*(vortex+3)-*(vortex+0);
 					forCoredist22=*(vortex+3+1)-*(vortex+1);
 					forCoredist23=*(vortex+3+2)-*(vortex+2);
@@ -103,15 +103,15 @@ void compute_influence_vring3D(double *grid,double *panels, double *colloc,doubl
 					r02=*(vortex+(i+1)*3+1)-*(vortex+i*3+1);
 					r03=*(vortex+(i+1)*3+2)-*(vortex+i*3+2);
 					if (i==2){
-						//beim 3. Segment also bei i==2 wird f�r die forCoredist2 der erste und der 4. Wirbelpunkt verwendet
+						//beim 3. Segment also bei i==2 wird für die forCoredist2 der erste und der 4. Wirbelpunkt verwendet
 						forCoredist21=*(vortex)-*(vortex+(i+1)*3);
 						forCoredist23=*(vortex+1)-*(vortex+(i+1)*3+1);
 						forCoredist23=*(vortex+2)-*(vortex+(i+1)*3+2);
 						
 					}
 					else {
-						//beim Segment 1 also i ==0 wird f�r forCoredist2 der 2. und der 3. Wirbelpunkt verwendet
-						//beim Segment 2 also i ==1 wird f�r forCoredist2 der 3. und der 4. Wirbelpunkt verwendet
+						//beim Segment 1 also i ==0 wird für forCoredist2 der 2. und der 3. Wirbelpunkt verwendet
+						//beim Segment 2 also i ==1 wird für forCoredist2 der 3. und der 4. Wirbelpunkt verwendet
 
 						forCoredist21=*(vortex+(i+2)*3)-*(vortex+(i+1)*3);
 						forCoredist22=*(vortex+(i+2)*3+1)-*(vortex+(i+1)*3+1);
@@ -136,9 +136,9 @@ void compute_influence_vring3D(double *grid,double *panels, double *colloc,doubl
                 r1xr0_3=r11*r02-r12*r01;
                 
                 coredist=sqrt(r1xr0_1*r1xr0_1+r1xr0_2*r1xr0_2+r1xr0_3*r1xr0_3)/norm_r0;
-				// manchmal sind die panels viel l�nger als breit, dann braucht man coredist2 bei der die 
-				// entfernung von P und Wirbelsegment auf die L�nge forCoredist2 normiert ist. Nur wenn hier 
-				// auch die coredist2 unter 0.01 liegt sollte der Einfluss nicht ber�cksichtigt werden
+				// manchmal sind die panels viel länger als breit, dann braucht man coredist2 bei der die 
+				// entfernung von P und Wirbelsegment auf die Länge forCoredist2 normiert ist. Nur wenn hier 
+				// auch die coredist2 unter 0.01 liegt sollte der Einfluss nicht berücksichtigt werden
 			
                 coredist2=sqrt(r1xr0_1*r1xr0_1+r1xr0_2*r1xr0_2+r1xr0_3*r1xr0_3)/norm_forCoredist2;
                 

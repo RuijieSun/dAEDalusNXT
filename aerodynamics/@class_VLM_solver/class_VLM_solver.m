@@ -1031,7 +1031,7 @@ classdef class_VLM_solver
             obj.Uinf=a2bf(norm(obj.Uinf),alpha,beta,obj.Ma_corr);
             obj.Uinf=obj.Uinf+[du 0 0];
             obj=obj.determine_boundary_conditions();
-            %Wenn hier nicht Uinf wieder r�ckg�ngig korrigiert wird
+            %Wenn hier nicht Uinf wieder rückgängig korrigiert wird
             %beinhalten alle folgenden Derivative den Einfluss der Uinf
             %Perturbation 
             obj.Uinf=origUinf;
@@ -1540,6 +1540,15 @@ classdef class_VLM_solver
             end
             %overwrite colloc_nvec
             obj.colloc_nvec=improvedCollocNvec;
+        end
+        function [hingeMoment]=computeHingeMoment(obj,CSPanels,CSHingeLine)
+            hingeOrigin=CSHingeLine(:,1);
+            hingeAxis=CSHingeLine(:,2)-CSHingeLine(:,1)./norm(CSHingeLine(:,2)-CSHingeLine(:,1));
+            originMoment=zeros(3,1);
+            for iCSPanel=1:length(CSPanels)
+            	originMoment=originMoment+cross(obj.r(:,CSPanels(iCSPanel))+obj.reference.p_ref'-hingeOrigin,obj.F_body(:,CSPanels(iCSPanel)));
+            end
+            hingeMoment=dot(originMoment,hingeAxis);
         end
     end
     
