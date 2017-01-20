@@ -120,7 +120,7 @@ close all
 % 
 %aircraft=aircraft.compute_forces(wingaero.F_body,wingaero.panels,wingaero.grid);
 % transforms aeroloads to structure
-aircraft=aircraft.compute_beam_forces(wingaero_trim.F_body,aircraft_structure);
+aircraft=aircraft.compute_beam_forces(wingaero_trim.F_body,wingaero_trim.F_body*0,aircraft_structure);
 for i=1:length(aircraft_structure.beam)
     if  isa(aircraft_structure.beam(i),'class_wing')
         aircraft_structure.beam(i)=aircraft_structure.beam(i).f_set_aeroloads(aircraft.wings(i));
