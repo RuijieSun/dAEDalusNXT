@@ -47,8 +47,8 @@
             <TIP_CHORD>3.7575 </TIP_CHORD>
             <ROOT_TWIST> 3.66  </ROOT_TWIST>
             <TIP_TWIST> 1.2   </TIP_TWIST>
-            <ROOT_PROFILE>  SC20414    </ROOT_PROFILE>
-            <TIP_PROFILE> SC20414 </TIP_PROFILE>
+            <ROOT_PROFILE>  NACA0012    </ROOT_PROFILE>
+            <TIP_PROFILE> NACA0012 </TIP_PROFILE>
             <wingbox type="StandardWingbox">
 					<root_frontspar> 0.1218 </root_frontspar>
 					<tip_frontspar> 0.157 </tip_frontspar>
@@ -69,8 +69,8 @@
             <TIP_CHORD> 2.2  </TIP_CHORD>
             <ROOT_TWIST> 1.2 </ROOT_TWIST>
             <TIP_TWIST>  -1.9  </TIP_TWIST>
-            <ROOT_PROFILE> SC20414  </ROOT_PROFILE>
-            <TIP_PROFILE> SC20414    </TIP_PROFILE>
+            <ROOT_PROFILE> NACA0012  </ROOT_PROFILE>
+            <TIP_PROFILE> NACA0012    </TIP_PROFILE>
             <CONTROL_SURFACE NAME="aileron" LOCATION="trailing_edge" DEFLECTION="asymmetric">
               <HINGELINE TYPE="tapered">  0.24    </HINGELINE>
               <STARTS>   0.6621</STARTS>
