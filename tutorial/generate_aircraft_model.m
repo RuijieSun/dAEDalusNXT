@@ -10,6 +10,7 @@ close all
 
 %% generate required paths for program execution
 addpath(genpath('../stdlib'));
+addpath(genpath('../airfoil'));
 addpath(genpath('../geometry'));
 addpath(genpath('../input'));
 addpath(genpath('../aerodynamics'));
