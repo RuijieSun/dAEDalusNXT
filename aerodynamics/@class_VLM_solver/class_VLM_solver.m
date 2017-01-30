@@ -1244,10 +1244,12 @@ classdef class_VLM_solver
         end
         
         function obj=plot_grid(obj)
+            hold on;
             for i=1:length(obj.panels)
-                handle= fill3(obj.grid(squeeze(obj.panels(i,:)),1), obj.grid(squeeze(obj.panels(i,:)),2),obj.grid(squeeze(obj.panels(i,:)),3),'b');
+                handle= fill3(obj.grid(1,obj.panels(:,i)), obj.grid(2,obj.panels(:,i)),obj.grid(3,obj.panels(:,i)),'b');
                 alpha(handle,0.4);
             end
+            axis equal
         end
         
         function obj=plot_L(obj)
