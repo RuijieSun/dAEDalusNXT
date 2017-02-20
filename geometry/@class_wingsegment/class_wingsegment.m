@@ -924,9 +924,9 @@ classdef class_wingsegment
             te_ctr=1;
             te_loc_ctr=1;
 % %             
-                deflections_structmesh(4,:)=-deflections_structmesh(4,:);
+                deflections_structmesh(4,:)=deflections_structmesh(4,:);
 % %              % deflections_structmesh(5,:)=-deflections_structmesh(5,:);
-          deflections_structmesh(6,:)=-deflections_structmesh(6,:);
+          deflections_structmesh(6,:)=deflections_structmesh(6,:);
     
 %                            deflections_structmesh(4,:)=deflections_structmesh(4,:);
 %              % deflections_structmesh(5,:)=-deflections_structmesh(5,:);
