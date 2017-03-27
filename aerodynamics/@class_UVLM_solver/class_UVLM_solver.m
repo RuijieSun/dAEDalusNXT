@@ -137,6 +137,15 @@ classdef class_UVLM_solver
         r;
         r_mid;
         r_dwn;
+        % vector with lever arms from colloc to hinge axis (inner hinge point)
+        r_cs;
+        % vector with lever arms from fvap to hinge axis (inner hinge point)
+        r_css;
+        % transformation matrices which transform the overall force vector to the hinge moments
+        Rcs;
+        % matrix containing the skew symmetric matrices of the hinge axes
+        Khat;
+        
         dvortex;
         
         Ma_corr;
@@ -211,6 +220,9 @@ classdef class_UVLM_solver
         CLr;
         CMr;
         CNr;
+        %hinge moment derivatives
+        CH;
+        CH_complex;
         
         
         CX_complex;
@@ -248,6 +260,9 @@ classdef class_UVLM_solver
         %lpv state space model valid for all speeds
         lpvSys;
         max_gust_loads;
+        
+        %state space representation (class_UVLM_SSM)
+        ssm
     end
     
     methods
@@ -263,8 +278,17 @@ classdef class_UVLM_solver
         obj=initialize_time_domain_solution(obj,t_step);
         obj=solve_time_domain_aerodynamics(obj,aircraft,x_body,V,alpha,beta,pqr,rho_air,itr,approach);
 
-        function obj=class_UVLM_solver(name,grid,is_te,panels,state,grid_wake,panels_wake,reference,settings)
+        function obj=class_UVLM_solver(name,grid,is_te,panels,state,grid_wake,panels_wake,reference,settings,varargin)
             
+            if nargin==9    %<- dirty, find workaround to specify control surfaces within UVLM, maybe uvlm.addHingeOutput
+                csPanelIds=[];
+                csHingePoints=[];
+                csHingeAxes=[];
+            elseif nargin==12
+                csPanelIds=varargin{10};
+                csHingePoints=varargin{11};
+                csHingeAxes=varargin{12};
+            end
             obj.case_name=name;
             
             obj.settings=settings;
@@ -282,6 +306,9 @@ classdef class_UVLM_solver
             obj.is_te=is_te;
             obj.reference=reference;
             obj.r=zeros(3,length(obj.panels));
+            nCs=size(csHingePoints,1);
+            obj.r_cs=zeros(3,length(obj.panels), nCs);
+            obj.r_css=zeros(3,length(obj.panels), nCs);
             
             %obj.grid_wake_init=grid_wake;
             obj.panels_wake_init=panels_wake;
@@ -294,6 +321,19 @@ classdef class_UVLM_solver
                 obj.r_dwn(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.25+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.75-obj.state.p_ref';
                 %from p_ref to 1/2
                 obj.r_mid(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.5+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.5-obj.state.p_ref';
+            end
+            % compute hinge moment lever arms
+            Rhat=zeros(length(obj.panels)*3,length(obj.panels)*3);
+            obj.Khat=zeros(3*length(obj.panels),3*length(obj.panels),nCs);
+            for iCs=1:nCs
+                obj.r_cs(:,csPanelIds{iCs},iCs)=obj.r_dwn(:,csPanelIds{iCs})-csHingePoints(iCs,:)';
+                obj.r_css(:,csPanelIds{iCs},iCs)=obj.r(:,csPanelIds{iCs})-csHingePoints(iCs,:)';
+                index=sort([(csPanelIds{iCs}-1)*3+1 (csPanelIds{iCs}-1)*3+2 (csPanelIds{iCs}-1)*3+3]);
+                obj.Khat(index,index,iCs)=kron(eye(length(csPanelIds{iCs})),[0 -csHingeAxes(iCs,3) csHingeAxes(iCs,2);csHingeAxes(iCs,3) 0 -csHingeAxes(iCs,1); -csHingeAxes(iCs,2) csHingeAxes(iCs,1) 0;]);
+                for iPanel=1:length(obj.panels)
+                    Rhat((iPanel-1)*3+1:iPanel*3,(iPanel-1)*3+1:iPanel*3)=[0 -obj.r_cs(3,iPanel,iCs) obj.r_cs(2,iPanel,iCs);obj.r_cs(3,iPanel,iCs) 0 -obj.r_cs(1,iPanel,iCs);-obj.r_cs(2,iPanel,iCs) obj.r_cs(1,iPanel,iCs) 0;];
+                end
+                obj.Rcs(iCs,:)=repmat(csHingeAxes(iCs,:),1,length(obj.panels))*Rhat;
             end
             
             if obj.Ma_corr<1
@@ -1670,7 +1710,26 @@ classdef class_UVLM_solver
                 hold on
                 plot(norm(obj.Uinf)*t_vec/obj.reference.c_ref,x(1)*cos(omega*t_vec+x(2))+x(3),'b');
             end
-            
+            %% CH
+            for iCs=1:size(obj.CH,1)
+                Init_Amplitude=(abs(max(obj.CH(iCs,length(t_vec)/4:end)))+abs(min(obj.CH(iCs,length(t_vec)/4:end))))/2;
+                Init_Phase=0;
+                Init_Offset=0.5*max(obj.CH(iCs,length(t_vec)/4:end))+0.5*min(obj.CH(iCs,length(t_vec)/4:end));
+                x = lsqcurvefit(@(x,t_vec) x(1)*cos(omega*t_vec+x(2))+x(3),[Init_Amplitude Init_Phase Init_Offset],t_vec(length(t_vec)/2:end),obj.CH(iCs,length(t_vec)/2:end),LB,UB,options);
+                if x(1)<amp_lim
+                    x(1)=0;
+                    x(2)=0;
+                end
+                obj.CH_complex(iCs,1:3)=[real(x(1)*exp(1i*(x(2)-pi/2))) imag(x(1)*exp(1i*(x(2)-pi/2))) x(3)];
+                % if obj.settings.debug mode is selected plot CM over time
+                if obj.settings.debug==1
+                    figure
+                    plot(norm(obj.Uinf)*t_vec/obj.reference.c_ref,obj.CH(iCs,:),'r');
+                    hold on
+                    plot(norm(obj.Uinf)*t_vec/obj.reference.c_ref,x(1)*cos(omega*t_vec+x(2))+x(3),'b');
+                end
+            end
+
             %%
             if obj.settings.modal_data==1
                 % TODO check LSQcurvefitting here. does not work in some
@@ -3047,24 +3106,16 @@ classdef class_UVLM_solver
             grid_n=aircraft.grid;
             
             for i=1:length(obj.t_vec)
-                prv_colloc=obj.colloc;
-%                 fact=sin(omega*obj.t_vec(i));
                 
-                if i<length(obj.t_vec)
-                    % Not sure if this average is right, but it showed better result
-                    % for heave and pitch motion compared to the Theodorsen
-                    % method
-                    aircraft.grid=aircraft.grid+(grid_p-grid)*sin(omega*(obj.t_vec(i)+obj.t_vec(i+1))/2);
-                else
-                    aircraft.grid=aircraft.grid+(grid_p-grid)*sin(omega*obj.t_vec(i));
+                prv_colloc=obj.colloc;
+                fact=sin(omega*obj.t_vec(i));
+                if fact>0
+                    aircraft.grid=grid+(grid_p-grid)*fact;
+                elseif fact==0;
+                    aircraft.grid=grid;
+                elseif fact<0
+                    aircraft.grid=grid+(grid_n-grid)*abs(fact);
                 end
-%                 if fact>0
-%                     aircraft.grid=grid+(grid_p-grid)*fact;
-%                 elseif fact==0;
-%                     aircraft.grid=grid;
-%                 elseif fact<0
-%                     aircraft.grid=grid+(grid_n-grid)*abs(fact);
-%                 end
                     
                 if shape~=0
                     aircraft_structure.nodal_deflections=shape;
@@ -3532,7 +3583,6 @@ classdef class_UVLM_solver
             
             obj.F_body=(obj.F_body2+obj.F_body_unsteady);
             obj.M_body=cross((obj.r_mid-obj.r),obj.F_body_unsteady); %this seems wrong! is M_body used somewhere??
-            
 %            obj.F_body(1,:)=obj.qinf*obj.area.*obj.colloc_nvec(1,:).*obj.cp;
 %            obj.F_body(2,:)=obj.qinf*obj.area.*obj.colloc_nvec(2,:).*obj.cp;
 %            obj.F_body(3,:)=obj.qinf*obj.area.*obj.colloc_nvec(3,:).*obj.cp;
@@ -3566,6 +3616,11 @@ classdef class_UVLM_solver
             CM=(sum(-obj.F_body2(3,:).*obj.r(1,:)+obj.F_body2(1,:).*obj.r(3,:))+sum(-obj.F_body_unsteady(3,:).*obj.r_mid(1,:)+obj.F_body_unsteady(1,:).*obj.r_mid(3,:)))/(obj.qinf*obj.reference.S_ref*obj.reference.c_ref);
             CN=sum(obj.F_body(2,:).*obj.r(1,:)-obj.F_body(1,:).*obj.r(2,:))/(obj.qinf*obj.reference.S_ref*obj.reference.b_ref);
          %   obj.r(1,:)=obj.r(1,:)/obj.Ma_corr;
+         
+            for iCs=1:size(obj.Rcs,3)
+                CH(iCs,1)=obj.Rcs(iCs,:)*reshape(obj.F_body,3*length(obj.panels),1)./(obj.qinf*obj.reference.S_ref);
+            end
+            obj.CH=[obj.CH CH];
             obj.CX=[obj.CX CX];
             obj.CY=[obj.CY CY];
             obj.CZ=[obj.CZ CZ];
@@ -4296,7 +4351,7 @@ classdef class_UVLM_solver
             Dss=[L1*L4 zeros(nB,nB); L2*L6 L2*L4; L8 zeros(nB,nB); L10 zeros(nB,nB); L12 zeros(nB,nB)];
             obj.sys=ss(Ass,Bss,Css,Dss);
             %restore original grid
-            obj=obj.initialize_unsteady_computation();
+%             obj=obj.initialize_unsteady_computation();
         end 
         function obj=generate_reduced_parameter_varying_ssm(obj,nOrder,t_step)
             % this function creates the ssm and the matrices to make it an parameter varying ssm which is valid for all speeds
@@ -4409,6 +4464,143 @@ classdef class_UVLM_solver
             %restore original grid
             obj=obj.initialize_unsteady_computation();
         end 
+        function obj=generate_state_space_matrices_vn2(obj,Vref,t_step)
+            %this function generates the state space matrices for a
+            %continuous time state space model
+            %input vector is[Vn; Vndot], (normal velocities on
+            %collocation point)
+            %output is panel force
+            
+%             obj=obj.f_compute_timestep(omega);
+            obj.t_step=t_step;
+            
+            %first the grid needs to be initialized
+            obj=obj.initialize_unsteady_computation();
+            
+            
+            %number of spanwise panels
+            nS=sum(obj.is_te);
+            %number of chordwise panels
+            nC=length(obj.Abb)/nS;
+            %number of bound panels
+            nB=nC*nS;
+            %xW describes the spacing of the wake grid
+            xW=obj.grid_wake(1,obj.panels_wake(1,1+nS))-obj.grid_wake(1,obj.panels_wake(1,1));
+            
+            
+            
+            %the grid needs to be modified (small first wake panel)
+            obj.grid_wake(1,:)=obj.grid_wake(1,:)-xW*0.25;
+            obj.grid_wake(1,obj.row_length+1:end)=obj.grid_wake(1,obj.row_length+1:end)-xW*0.75;
+            obj.grid_vring(1,unique(obj.panels(3:4,find(obj.is_te))))=obj.grid_vring(1,unique(obj.panels(3:4,find(obj.is_te))))-0.25*xW;
+            obj=obj.compute_influence_coeff_matrix();
+
+            % number of ALL wake panels
+            nW=size(obj.Abw,2);
+            % number of REST wake panels
+            nWR=nW-nS;
+            
+            %K1 is the influence coefficients of bound on bound panels
+            K1=-obj.Abb;
+            %K2 is the influence coefficients of small first wake row on bound
+            K2=-obj.Abw(:,1:nS);
+            %K3 is the influence coefficients of wake on bound
+            K3=-obj.Abw(:,nS+1:end);
+            
+            %K4 maps all body gamma to vector of gammas of last row
+            K4=diag(obj.is_te)'*1;
+            K4(all(K4==0,2),:)=[];
+            %K5 is an eye matrix of the number of spanwise panels 
+            K5=-eye(nS); 
+            %K6 is transport within rest wake
+            K6=([zeros(nS,nWR) ;eye(nWR-nS) zeros(nWR-nS,nS)]-eye(nWR))*Vref/xW;
+            %K7 is transport within first wake row
+            K7=[eye(nS); zeros(nWR-nS,nS)]*Vref/xW;
+            %
+            K8=+K6+K7*(K5-K4*K1^-1*K2)^-1*K4*K1^-1*K3;
+            K9=-K7*(K5-K4*K1^-1*K2)^-1*K4*K1^-1;
+            
+%             K9(1:7,1:28)=K9(8:14,29:end);
+%             K9(8:14,1:28)=K9(1:7,29:end);
+            
+            l=((0.75*obj.grid(:,obj.panels(2,:))+0.25*obj.grid(:,obj.panels(3,:)))-(0.75*obj.grid(:,obj.panels(1,:))+0.25*obj.grid(:,obj.panels(4,:))))';
+            crossProduct1=cross(repmat((obj.Uinf)./norm(obj.Uinf),nB,1),l)*Vref;
+            crossProduct2=(crossProduct1./repmat(sum(crossProduct1,2),1,3));
+            %currently only z force being output
+            factor1=obj.state.rho_air.*[crossProduct1(:,1); crossProduct1(:,2); crossProduct1(:,3)];
+            factor2=obj.state.rho_air*([crossProduct2(:,1).*obj.area'; crossProduct2(:,2).*obj.area'; crossProduct2(:,3).*obj.area']);
+            L1=([zeros(1,nB); -diag(~obj.is_te(1:end-1)') zeros(nB-1,1)]+ eye(nB,nB));
+            L2=(1/2*([zeros(1,nB); diag(~obj.is_te(1:end-1)') zeros(nB-1,1)]+ eye(nB,nB)));
+            L1=blkdiag(L1,L1,L1).*repmat(factor1,1,3*nB);
+            L2=blkdiag(L2,L2,L2).*repmat(factor2,1,3*nB);
+
+            L3=-(K1-K2*K5^-1*K4)^-1*K3;
+            L4=(K1-K2*K5^-1*K4)^-1;
+            
+            L5a=L1*repmat(L3,3,1);%L5a~V
+            L5b=L2*repmat(L3*K8,3,1);%L5b~V
+            L5=L5a+L5b;
+            
+            L6a=L1*repmat(L4,3,1); %L6a~V
+            L6b=L2*repmat(L3*K9,3,1); %L6b~V
+            L6=L6a+L6b;
+            
+            L7=L2*repmat(L4,3,1);
+            
+            Ass=[K8];
+            Bss=[K9 zeros(nWR,nB)];
+            Css=[L5];
+            Dss=[L6 L7];
+            obj.sysvn=ss(Ass,Bss,Css,Dss);
+            obj.sysvn.StateName=[cellstr([repmat('wakeVort_',nWR,1) num2str([1:nWR]','%04d')]);];
+            obj.sysvn.InputName=[cellstr([repmat('normV_',nB,1) num2str([1:nB]','%04d')]); cellstr([repmat('normVdot_',nB,1) num2str([1:nB]','%04d')]);];
+            obj.sysvn.OutputName=[cellstr([repmat('panelForceX_',nB,1) num2str([1:nB]','%04d')]);cellstr([repmat('panelForceY_',nB,1) num2str([1:nB]','%04d')]);cellstr([repmat('panelForceZ_',nB,1) num2str([1:nB]','%04d')])];
+            obj.lpvSys.a=K8/Vref;
+            obj.lpvSys.b=[K9 zeros(nWR,nB)]/Vref;
+            obj.lpvSys.c=L5/Vref;
+            obj.lpvSys.dk=[L6*0 L7];
+            obj.lpvSys.df=[L6/Vref L7*0];
+           
+            %restore original grid
+            obj=obj.initialize_unsteady_computation();
+        end 
+        function obj=generateSSM(obj)
+            %this function generates the state space matrices for a
+            %continuous time state space model
+            %input vector is Vn and Vndot, (normal velocities on
+            %collocation point)
+            %output is Gammab, Gammabdot,vsindx vsindy vsindz (induced
+            %velocity on segments)
+            
+            disp('Preparing UVLM for SSM Generation')
+            %% prepare solver for SSM
+            solverForSSM=obj;
+            % calculate required timestep
+            tStep=diff(obj.grid(1,obj.panels(2:3,1)))/norm(obj.Uinf);
+            % set timestep according to discretization
+            %copy obj before grid modification
+            solverForSSM.t_step=tStep;
+            %initialize computation <- why? because of new timestep?                            <-TODO
+            %redo so that AIC is only computed once! saves 50% of the time
+            %oO
+            solverForSSM=solverForSSM.initialize_unsteady_computation();
+            %number of spanwise panels
+            nS=sum(solverForSSM.is_te);
+            %number of chordwise panels
+            nC=length(solverForSSM.Abb)/nS;
+            %xW describes the spacing of the wake grid
+            xW=solverForSSM.grid_wake(1,solverForSSM.panels_wake(1,1+nS))-solverForSSM.grid_wake(1,solverForSSM.panels_wake(1,1));
+            
+            %the grid needs to be modified (small first wake panel)
+            solverForSSM.grid_wake(1,:)=solverForSSM.grid_wake(1,:)-xW*0.25;
+            solverForSSM.grid_wake(1,solverForSSM.row_length+1:end)=solverForSSM.grid_wake(1,solverForSSM.row_length+1:end)-xW*0.75;
+            solverForSSM.grid_vring(1,unique(solverForSSM.panels(3:4,find(solverForSSM.is_te))))=solverForSSM.grid_vring(1,unique(solverForSSM.panels(3:4,find(solverForSSM.is_te))))-0.25*xW;
+            %recompute influence coefficients with new grid
+            solverForSSM=solverForSSM.compute_influence_coeff_matrix();
+            obj=solverForSSM;
+            %% generate SSM with prepared solver instance
+            obj.ssm=class_UVLM_SSM(solverForSSM);
+        end
     end
     
 end
