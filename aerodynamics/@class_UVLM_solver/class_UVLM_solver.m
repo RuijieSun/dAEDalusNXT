@@ -285,9 +285,9 @@ classdef class_UVLM_solver
                 csHingePoints=[];
                 csHingeAxes=[];
             elseif nargin==12
-                csPanelIds=varargin{10};
-                csHingePoints=varargin{11};
-                csHingeAxes=varargin{12};
+                csPanelIds=varargin{1};
+                csHingePoints=varargin{2};
+                csHingeAxes=varargin{3};
             end
             obj.case_name=name;
             
