@@ -3617,10 +3617,12 @@ classdef class_UVLM_solver
             CN=sum(obj.F_body(2,:).*obj.r(1,:)-obj.F_body(1,:).*obj.r(2,:))/(obj.qinf*obj.reference.S_ref*obj.reference.b_ref);
          %   obj.r(1,:)=obj.r(1,:)/obj.Ma_corr;
          
-            for iCs=1:size(obj.Rcs,3)
+            for iCs=1:size(obj.Rcs,1)
                 CH(iCs,1)=obj.Rcs(iCs,:)*reshape(obj.F_body,3*length(obj.panels),1)./(obj.qinf*obj.reference.S_ref);
             end
-            obj.CH=[obj.CH CH];
+            if ~isempty(obj.Rcs)
+                obj.CH=[obj.CH CH];
+            end
             obj.CX=[obj.CX CX];
             obj.CY=[obj.CY CY];
             obj.CZ=[obj.CZ CZ];
