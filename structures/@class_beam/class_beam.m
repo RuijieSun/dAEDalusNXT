@@ -216,10 +216,16 @@ classdef class_beam < matlab.mixin.Heterogeneous
              obj.nodal_masses=zeros((obj.nel+1),7);
              % only required for non-linear elements... possibly
              % differentiate later
-             
-             for i=1:obj.nel
-                 beamelement(i) = class_beamelement(crosssections(i), obj);
-                 beamelement(i).nodal_deflections_loc = zeros(2*obj.el_ndof,1); 
+             if ischar(crosssections)
+                 for i=1:obj.nel
+                     beamelement(i) = class_beamelement(crosssections, obj);
+                     beamelement(i).nodal_deflections_loc = zeros(2*obj.el_ndof,1); 
+                 end
+             else
+                 for i=1:obj.nel
+                     beamelement(i) = class_beamelement(crosssections(i), obj);
+                     beamelement(i).nodal_deflections_loc = zeros(2*obj.el_ndof,1); 
+                 end
              end
              obj.beamelement = beamelement;
          end         
