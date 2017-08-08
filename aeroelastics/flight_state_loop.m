@@ -129,7 +129,7 @@ while~converged
     if aeroelastic_solver_settings.unrestrained
 		mean_axis_origin = aircraft_structure.f_compute_CG;
     	state.aircraft_state.CG_ref=mean_axis_origin';
-	end
+    end
     
     prev_error=error;
     
@@ -161,7 +161,9 @@ end
 
 def=aircraft_structure.f_get_deflections;
 aircraft=aircraft.compute_deflected_grid(def);
-wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,state.aerodynamic_state,aircraft.reference);
+trim_ref=aircraft.reference;                    
+trim_ref.p_ref=state.aircraft_state.CG_ref;
+wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,state.aerodynamic_state,trim_ref);
 wingaero=wingaero.f_solve_std();
 %      figure;
 %      wingaero.plot_cp;

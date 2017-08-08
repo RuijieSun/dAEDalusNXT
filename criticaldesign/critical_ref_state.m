@@ -14,7 +14,8 @@ function [ref_state] =critical_ref_state(aircraft,MCruise,StructuralDesignAltitu
 %aircraft_state=class_aircraft_state(aircraft,[0.083333333*aircraft.reference.c_ref 0 0]);
 
 aircraft_state=class_aircraft_state(aircraft,aircraft.reference.p_ref);
-[rho_air,a,T,P,mu]=stdatmo(StructuralDesignAltitude);
+[~,a,press,rho_air] = atmosisa(StructuralDesignAltitude);  % To use single standard throughout the tool. 
+% [rho_air,a,T,P,mu]=stdatmo(StructuralDesignAltitude);
 
 V=[MCruise*a 0 0];
 

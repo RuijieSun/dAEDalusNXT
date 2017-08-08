@@ -497,7 +497,7 @@ classdef class_fuselagesegment
                 obj=obj.compute_segment_coordinates();
                 
             else
-                fprintf('Unknown Data Format');
+                fprintf('Unknown Data Format: %s \n', xmlstruct.tag);
             end
         end
         

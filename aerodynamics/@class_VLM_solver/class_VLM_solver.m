@@ -133,6 +133,7 @@ classdef class_VLM_solver
         
         crossp;
         
+        
     end
     
     methods
@@ -202,6 +203,9 @@ classdef class_VLM_solver
         function obj=compute_colloc_points(obj)
             for i=1:1:length(obj.panels)
                 obj.colloc(:,i)=0.125*obj.grid(:,obj.panels(1,i))+0.125*obj.grid(:,obj.panels(2,i))+0.375*obj.grid(:,obj.panels(3,i))+0.375*obj.grid(:,obj.panels(4,i));
+                %todo better: see function update_nvec2 -> not possible for
+                %deflected grids? because it needs flat grid -> flat grid
+                %deflected?
                 n_vec=cross(obj.grid(:,obj.panels(3,i))-obj.grid(:,obj.panels(1,i)),obj.grid(:,obj.panels(4,i))-obj.grid(:,obj.panels(2,i)));
                 obj.colloc_nvec(:,i)=n_vec/norm(n_vec);
             end
@@ -922,7 +926,10 @@ classdef class_VLM_solver
 %                 obj.Uinf(2)=obj.Uinf(2)+uvwind(2);
 %                 obj.Uinf(1)=obj.Uinf(1)+uvwind(1);
 %                 
-                obj.F_body(:,i)=1/beta_inf*(obj.rho*obj.Gamma(i)*cross(sp',(obj.Uinf+[u(i),v(i),w(i)])'))';
+                obj.F_body(:,i)=1/beta_inf*(obj.rho*obj.Gamma(i)*cross(sp',(obj.Uinf+[u(i),v(i),w(i)])'))';                
+                %nastran way of force computation
+%                 obj.F_body(:,i)=1/beta_inf*(obj.rho*obj.Gamma(i)*norm(sp)*obj.colloc_nvec(:,i)'*norm((obj.Uinf+0*[u(i),v(i),w(i)])))';
+
                 obj.M_body(:,i)=zeros(3,1);
                % obj.F_body(2,i)=-obj.F_body(2,i);
                 
@@ -940,8 +947,8 @@ classdef class_VLM_solver
                 % obj.F_aero(:,i)=(obj.rho*obj.Gamma(i)*cross(sp',obj.Uinf'))';
                 % obj.cdi(:,i)=-(obj.rho*obj.Gamma(i)*obj.wind(i)*cross(sp',obj.Uinf'/norm(obj.Uinf)))';
                 % obj.cdi(:,i)=M_BA'*(obj.rho*obj.Gamma(i)*cross(sp',(obj.Uinf'+uvwind)/norm(obj.Uinf+uvwind')))';
-                
-                obj.cp(i)=1/beta_inf*2*obj.Gamma(i)/(norm(obj.Uinf)*norm(obj.grid(:,obj.panels(4,i))-obj.grid(:,obj.panels(1,i))));
+                sc=(norm(obj.grid(:,obj.panels(4,i))-obj.grid(:,obj.panels(1,i)))+norm(obj.grid(:,obj.panels(3,i))-obj.grid(:,obj.panels(2,i))))/2;
+                obj.cp(i)=1/beta_inf*2*obj.Gamma(i)/(norm(obj.Uinf)*sc);
                 
                 %obj.A(i)=norm(cross(obj.grid(:,obj.panels(2,i))-obj.grid(:,obj.panels(1,i)),obj.grid(:,obj.panels(4,i))-obj.grid(:,obj.panels(1,i))));
                 obj.cl(:,i)=obj.F_body(:,i)/(obj.qinf*obj.reference.S_ref);
@@ -982,6 +989,18 @@ classdef class_VLM_solver
             grid(2,:)=obj.grid(2,:);
             grid(3,:)=obj.grid(3,:);
         end
+        
+        function obj=f_calc_coeffs(obj)
+            [obj.C,cc1,cc2,cc3]=compute_influence_coefficients_vor5(obj.grid,obj.panels,obj.te_idx',obj.colloc(:,:),obj.colloc_nvec(:,:),obj.Uinf);
+            obj.Cind=[cc1,cc2,cc3];
+        end
+        
+        function obj=f_solve_fast(obj)
+            obj=obj.determine_boundary_conditions();
+            obj.Gamma=linsolve(obj.C,obj.b');
+            obj=obj.f_postprocess(0);
+        end
+        
         function obj=f_solve_std(obj)
             obj=obj.solve_MEX_vor5();
             %obj=obj.solve();
@@ -994,21 +1013,21 @@ classdef class_VLM_solver
             obj=obj.f_postprocess('quick');
         end
         
-        function obj=f_solve_vor3(obj)
-            %vor 3 -> no computation of Cind ->Lift normal to panel and
-            %Uinf
-            obj=obj.solve_MEX_vor3(); 
-            obj=obj.f_postprocess(0);
-        end
+%         function obj=f_solve_vor3(obj)
+%             %vor 3 -> no computation of Cind ->Lift normal to panel and
+%             %Uinf
+%             obj=obj.solve_MEX_vor3(); 
+%             obj=obj.f_postprocess(0);
+%         end
                 
-        function obj=f_solve_vor4(obj)
-            %vor 4 -> Cind for colloc points
-            obj=obj.solve_MEX_vor4(); 
-            obj=obj.f_postprocess(0);
-        end
+%         function obj=f_solve_vor4(obj)
+%             %vor 4 -> Cind for colloc points
+%             obj=obj.solve_MEX_vor4(); 
+%             obj=obj.f_postprocess(0);
+%         end
         
         function obj=f_solve_vor5(obj)
-            %vor 4 -> Cind for 1/4 points 
+            %vor 5 -> Cind for 1/4 points 
             obj=obj.solve_MEX_vor5(); 
             obj=obj.f_postprocess(0);
         end
@@ -1088,7 +1107,7 @@ classdef class_VLM_solver
             alpha=obj.state.alpha;
             beta=obj.state.beta;
             obj.Uinf=a2bf(norm(obj.Uinf),alpha,beta,obj.Ma_corr);
-            obj=obj.solve_MEX_vor3();
+            obj=obj.solve_MEX_vor5();
             obj=obj.f_postprocess(CD_f);
             
             
@@ -1206,6 +1225,42 @@ classdef class_VLM_solver
             obj=obj.f_postprocess();
         end
         
+        function obj=f_solve_for_Cl_fast(obj,Cl_target)
+            %% TODO: validate, enable entering of alpha start and tolerance
+            alpha_0=0;
+            tolerance=0.0001;
+                     
+            obj.Uinf=a2bf(norm(obj.Uinf),alpha_0,obj.state.beta,obj.Ma_corr);
+            obj=obj.f_solve_std();
+            Cl_1=obj.CZ;
+            alpha_0=5;
+            obj.Uinf=a2bf(norm(obj.Uinf),alpha_0,obj.state.beta,obj.Ma_corr);
+            obj=obj.f_solve_fast();
+            Cl_prev=obj.CZ;
+            dCLalpha=Cl_prev-Cl_1;
+            dalpha=(Cl_target-Cl_prev)/dCLalpha;
+            alpha=alpha_0+dalpha;
+            obj.Uinf=a2bf(norm(obj.Uinf),alpha,obj.state.beta,obj.Ma_corr);
+            obj=obj.f_solve_fast();
+            dCLalpha=(obj.CZ-Cl_prev)/dalpha;
+            i=1;
+            while abs(obj.CZ-Cl_target)>tolerance
+                Cl_prev=obj.CZ;
+                dalpha=(Cl_target-Cl_prev)/dCLalpha;
+                alpha=alpha+dalpha;
+                obj.Uinf=a2bf(norm(obj.Uinf),alpha,obj.state.beta,obj.Ma_corr);
+                obj=obj.f_solve_fast();
+                i=i+1;
+                dCLalpha=(obj.CZ-Cl_prev)/dalpha;
+                if i>30
+                    sprintf('f_solve_for_Cl did not converge!')
+                    break;
+                end
+            end
+            obj=obj.f_solve_fast();
+            obj.state=obj.state.set_alpha(alpha);
+        end
+        
         function obj=f_solve_for_Cl(obj,Cl_target)
             %% TODO: validate, enable entering of alpha start and tolerance
             alpha_0=0;
@@ -1214,26 +1269,26 @@ classdef class_VLM_solver
             
             obj.Uinf=a2bf(norm(obj.Uinf),alpha_0,obj.state.beta,obj.Ma_corr);
             obj=obj.f_solve_std();
-            Cl_1=obj.CZ;
+            Cl_1=obj.Cl;  %wrong coefficient was defined (6 occurences), Cl_target is in wind frame
             alpha_0=5;
             obj.Uinf=a2bf(norm(obj.Uinf),alpha_0,obj.state.beta,obj.Ma_corr);
             obj=obj.f_solve_std();
-            Cl_prev=obj.CZ;
+            Cl_prev=obj.Cl;
             dCLalpha=Cl_prev-Cl_1;
             dalpha=(Cl_target-Cl_prev)/dCLalpha;
             alpha=alpha_0+dalpha;
             obj.Uinf=a2bf(norm(obj.Uinf),alpha,obj.state.beta,obj.Ma_corr);
             obj=obj.f_solve_std();
-            dCLalpha=(obj.CZ-Cl_prev)/dalpha;
+            dCLalpha=(obj.Cl-Cl_prev)/dalpha;
             i=1;
-            while abs(obj.CZ-Cl_target)>tolerance
-                Cl_prev=obj.CZ;
+            while abs(obj.Cl-Cl_target)>tolerance
+                Cl_prev=obj.Cl;
                 dalpha=(Cl_target-Cl_prev)/dCLalpha;
                 alpha=alpha+dalpha;
                 obj.Uinf=a2bf(norm(obj.Uinf),alpha,obj.state.beta,obj.Ma_corr);
                 obj=obj.f_solve_std();
                 i=i+1;
-                dCLalpha=(obj.CZ-Cl_prev)/dalpha;
+                dCLalpha=(obj.Cl-Cl_prev)/dalpha;
                 if i>30
                     sprintf('f_solve_for_Cl did not converge!')
                     break;
@@ -1244,12 +1299,10 @@ classdef class_VLM_solver
         end
         
         function obj=plot_grid(obj)
-            hold on;
             for i=1:length(obj.panels)
-                handle= fill3(obj.grid(1,obj.panels(:,i)), obj.grid(2,obj.panels(:,i)),obj.grid(3,obj.panels(:,i)),'b');
+                handle= fill3(obj.grid(squeeze(obj.panels(i,:)),1), obj.grid(squeeze(obj.panels(i,:)),2),obj.grid(squeeze(obj.panels(i,:)),3),'b');
                 alpha(handle,0.4);
             end
-            axis equal
         end
         
         function obj=plot_L(obj)

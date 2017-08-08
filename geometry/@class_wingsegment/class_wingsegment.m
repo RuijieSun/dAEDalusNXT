@@ -129,6 +129,163 @@ classdef class_wingsegment
         %> number of beam elements; will be determined by grid spacing if
         % zero
         nBeamelements = 0;
+        
+        % This struct will hold the following information about this wing
+        % segment's structure:
+        % fs_segments: [xsi_root, xsi_tip,  t_web, t_top, t_bottom]
+        % rs_segments: [xsi_root, xsi_tip,  t_web, t_top, t_bottom]
+        % where xsi is the normalized chordwise position of the spar.
+        structural_properties;
+    end
+    
+    methods (Static)
+        function obj = create_from_cpacs(tixi, tigl, wingIndex, segmentIndex)
+            obj = class_wingsegment();
+            
+            xr = zeros(3,1);
+            xt = zeros(3,1);
+            xle_r = zeros(3,1);
+            xle_t = zeros(3,1);
+            xte_r = zeros(3,1);
+            xte_t = zeros(3,1);
+
+            % Get the root and tip quarter chord points in global coordinates.
+            [xr(1), xr(2), xr(3)] = tiglWingGetChordPoint(tigl, wingIndex, segmentIndex, 0, .25);
+            [xt(1), xt(2), xt(3)] = tiglWingGetChordPoint(tigl, wingIndex, segmentIndex, 1, .25);
+
+            % The dihedral angle of the quarter chord line can be found by taking the 
+            % inverse tangent of the length along the global z-axis over the length 
+            % along the global y-axis.
+            Gamma = atand((xt(3)-xr(3))/(xt(2)-xr(2)));
+            
+            % Calculate the rotation matrix for the diherdral angle
+            Rx = [1 0 0; 0 cosd(Gamma) -sind(Gamma); 0 sind(Gamma) cosd(Gamma)];
+
+            % De-rotate the quarter chord line from the dihedral down onto the global
+            % x-y-plane. Make sure to subtract the root coordinates first, because the
+            % rotation is done w.r.t. the root quarter point. Then at the root
+            % coordinates again.
+            xt_ = Rx\(xt-xr) + xr;
+
+            % The quarter chord sweep is then the angle between the global y-axis and
+            % this de-rotated line.
+            Lambda = atand((xt_(1)-xr(1))/(xt_(2)-xr(2)));
+
+            % In dAEDalus the span is defined as the length between the two quarter
+            % chord points.
+            b = norm(xt - xr);
+
+            % Now the span needs to be corrected for dAEDalus' 'fake' sweep.
+            b = b*cosd(Lambda);
+
+            % Get the root and tip chord lengths by simply calculating the distance
+            % between the leading and trailing edge points of the root and tip in
+            % global coordinates.
+            [xle_r(1), xle_r(2), xle_r(3)] = tiglWingGetChordPoint(tigl, wingIndex, segmentIndex, 0, 0);
+            [xte_r(1), xte_r(2), xte_r(3)] = tiglWingGetChordPoint(tigl, wingIndex, segmentIndex, 0, 1);
+            [xle_t(1), xle_t(2), xle_t(3)] = tiglWingGetChordPoint(tigl, wingIndex, segmentIndex, 1, 0);
+            [xte_t(1), xte_t(2), xte_t(3)] = tiglWingGetChordPoint(tigl, wingIndex, segmentIndex, 1, 1);
+
+            c_r = norm(xte_r - xle_r);
+            c_t = norm(xte_t - xle_t);
+
+            % To calculate the twist angles de-rotate the leading edge points of the
+            % root and tip sections first. Again, subtract and then add the quarter
+            % point first to assure the rotation happens relative to the quarter chord
+            % points.
+            xle_r_ = Rx\(xle_r - xr) + xr;
+            xle_t_ = Rx\(xle_t - xr) + xr;
+
+            % Then the twists can be determined by calculating the angles between the
+            % local x-axes and the line connecting the leading edges and quarter chord
+            % points.
+            twist_r = atand((xle_r_(3) - xr(3))/abs(xle_r_(1) - xr(1)));
+            twist_t = atand((xle_t_(3) - xt_(3))/abs(xle_t_(1) - xt_(1)));
+            
+            % Set the object's properties from these calculated properties
+            obj.pos = xr';
+            obj.b = b;
+            obj.c_r = c_r;
+            obj.c_t = c_t;
+            obj.dihed = Gamma;
+            obj.c4_sweep = Lambda;
+            obj.Theta_r = twist_r;
+            obj.Theta_t = twist_t;
+            obj.has_te_cs = 0;
+            obj.has_le_cs = 0;
+            %obj.c4_sweep=atan2d(obj.b*tand(obj.le_sweep)+obj.c_t/4-obj.c_r/4, obj.b);
+            obj=obj.complete_params_from_stdinit();
+                
+            [secUID_r, elemUID_r] = tiglWingGetInnerSectionAndElementUID(tigl, wingIndex, segmentIndex);        
+            [secUID_t, elemUID_t] = tiglWingGetOuterSectionAndElementUID(tigl, wingIndex, segmentIndex);
+            
+            x_sec_r = tixiUIDGetXPath(tixi, secUID_r);
+            x_sec_t = tixiUIDGetXPath(tixi, secUID_t);       
+            
+            [c_r, ~, t_r] = tixiGetPoint(tixi, [x_sec_r, '/transformation/scaling']);
+            [c_t, ~, t_t] = tixiGetPoint(tixi, [x_sec_t, '/transformation/scaling']);
+                   
+            x_elem_r = tixiUIDGetXPath(tixi, elemUID_r);
+            x_elem_t = tixiUIDGetXPath(tixi, elemUID_t);
+            
+            obj.profile_name_r = tixiGetTextElement(tixi, [x_elem_r, '/airfoilUID']);
+            obj.profile_name_t = tixiGetTextElement(tixi, [x_elem_t, '/airfoilUID']);
+                                         
+            x_af_r = tixiUIDGetXPath(tixi, obj.profile_name_r);
+            x_af_t = tixiUIDGetXPath(tixi, obj.profile_name_t);
+            
+            try
+                n_af_r = tixiGetVectorSize(tixi, [x_af_r, '/pointList/x']);
+                n_af_t = tixiGetVectorSize(tixi, [x_af_t, '/pointList/x']);
+
+                af_r_x = tixiGetFloatVector(tixi, [x_af_r, '/pointList/x'], n_af_r);
+                af_r_z = tixiGetFloatVector(tixi, [x_af_r, '/pointList/z'], n_af_r);
+
+                af_t_x = tixiGetFloatVector(tixi, [x_af_t, '/pointList/x'], n_af_t);
+                af_t_z = tixiGetFloatVector(tixi, [x_af_t, '/pointList/z'], n_af_t);
+
+                if mod(n_af_r, 2) ~= 0
+                    ids = [1:ceil(n_af_r/2), ceil(n_af_r/2):n_af_r];
+                    af_r_x = af_r_x(ids);
+                    af_r_z = af_r_z(ids);
+                end
+                
+                if mod(n_af_t, 2) ~= 0
+                    ids = [1:ceil(n_af_t/2), ceil(n_af_t/2):n_af_t];
+                    af_t_x = af_t_x(ids);
+                    af_t_z = af_t_z(ids); 
+                end
+                
+                n_af_r = ceil(n_af_r/2);
+                n_af_t = ceil(n_af_t/2);
+                
+                af_r_z_upper = af_r_z(1:n_af_r)';
+                af_r_z_lower = af_r_z(n_af_r+1:end)';
+                
+                af_t_z_upper = af_t_z(1:n_af_t)';
+                af_t_z_lower = af_t_z(n_af_t+1:end)';
+                
+                t_max_r = max(abs(af_r_z_upper - af_r_z_lower));
+                t_max_t = max(abs(af_t_z_upper - af_t_z_lower));
+
+                obj.tc = mean([t_max_r*t_r/c_r, t_max_t*t_t/c_t]);
+
+                obj.profile_r = [n_af_r, n_af_r; ...
+                    flipud([af_r_x(1:n_af_r)', af_r_z_upper]); ...
+                    af_r_x(n_af_r+1:end)', af_r_z_lower];
+
+                obj.profile_t = [n_af_t, n_af_t; ...
+                    flipud([af_t_x(1:n_af_t)', af_t_z_upper]); ...
+                    af_t_x(n_af_t+1:end)', af_t_z_lower];               
+            catch
+            end
+
+            obj.xyz = [xle_r, xle_t, xte_t, xte_r];
+            obj.le_dihed=asind((xle_t(3)-xle_r(3))/obj.b);
+            
+            obj=obj.compute_controlsurface_coordinates();
+            obj=obj.compute_xyz_fixed();
+        end
     end
     
     methods
@@ -136,7 +293,9 @@ classdef class_wingsegment
         function obj = class_wingsegment(varargin)
             
             % input parameter is edge coordinates
-            if nargin==1
+            if nargin == 0
+                % pass
+            elseif nargin==1
                 obj=obj.read_xml_definition(varargin{1});
             elseif nargin==4
                 obj.profile_name_r='flat_plate';
@@ -370,9 +529,12 @@ classdef class_wingsegment
                 end
                 obj=obj.compute_segment_coordinates();
             end
-            % compute flap edge points
-            obj=obj.compute_controlsurface_coordinates();
-            obj=obj.compute_xyz_fixed();
+            
+            if nargin ~= 0
+                % compute flap edge points
+                obj=obj.compute_controlsurface_coordinates();
+                obj=obj.compute_xyz_fixed();
+            end
         end
         
         function obj=add_control_surface(obj,control_surface)
@@ -642,7 +804,8 @@ classdef class_wingsegment
         function obj=compute_controlsurface_coordinates(obj)                
             if obj.has_te_cs
                 obj.delta_te_device=obj.te_device.delta;
-            elseif obj.has_le_cs
+            end
+            if obj.has_le_cs
                 obj.delta_le_device=obj.le_device.delta;
             end
             
@@ -773,8 +936,41 @@ classdef class_wingsegment
             rear_coords=[];
             c4_coords=[];
             
-            front_sp=frontspar(1)*(1-span_grid)+frontspar(2)*span_grid;
-            rear_sp=rearspar(1)*(1-span_grid)+rearspar(2)*span_grid;
+            if isempty(frontspar) && isempty(rearspar)
+                eta_input = [0, 1];
+                xsi_fs_input = [obj.structural_properties.fs_segments(:, 1)', obj.structural_properties.fs_segments(end, 2)];
+                xsi_rs_input = [obj.structural_properties.rs_segments(:, 1)', obj.structural_properties.rs_segments(end, 2)];
+
+                front_sp = interp1(eta_input, xsi_fs_input, span_grid, 'lin');
+                rear_sp = interp1(eta_input, xsi_rs_input, span_grid, 'lin');
+                
+                eta_input = eta_input(1:end-1);
+                t_fs_input = obj.structural_properties.fs_segments(:, 3)';
+                t_rs_input = obj.structural_properties.rs_segments(:, 3)';
+                t_ts_input = (obj.structural_properties.fs_segments(:, 4)' + obj.structural_properties.rs_segments(:, 4)')/2;
+                t_bs_input = (obj.structural_properties.fs_segments(:, 5)' + obj.structural_properties.rs_segments(:, 5)')/2;
+                
+                if length(eta_input) == 1
+                    eta_input = [0, 1];
+                    t_fs_input = [t_fs_input, t_fs_input];
+                    t_rs_input = [t_rs_input, t_rs_input];
+                    t_ts_input = [t_ts_input, t_ts_input];
+                    t_bs_input = [t_bs_input, t_bs_input];
+                end
+                
+                t_fs = interp1(eta_input, t_fs_input, span_grid, 'lin', 'extrap');
+                t_rs = interp1(eta_input, t_rs_input, span_grid, 'lin', 'extrap');
+                t_ts = interp1(eta_input, t_ts_input, span_grid, 'lin', 'extrap');
+                t_bs = interp1(eta_input, t_bs_input, span_grid, 'lin', 'extrap');
+                
+                obj.structural_properties.t_fs = t_fs;
+                obj.structural_properties.t_rs = t_rs;
+                obj.structural_properties.t_ts = t_ts;
+                obj.structural_properties.t_bs = t_bs;
+            else
+                front_sp=frontspar(1)*(1-span_grid)+frontspar(2)*span_grid;
+                rear_sp=rearspar(1)*(1-span_grid)+rearspar(2)*span_grid;
+            end
             
             for i=1:n+1
                 front_coords(:,i)=(obj.xyz(:,1)*(1-front_sp(i))+obj.xyz(:,4)*front_sp(i))+span_grid(i)*(obj.xyz(:,2)*(1-front_sp(i))+obj.xyz(:,3)*front_sp(i)-obj.xyz(:,1)*(1-front_sp(i))-obj.xyz(:,4)*front_sp(i));
@@ -1540,11 +1736,15 @@ classdef class_wingsegment
             
             grid3D=1;
 
-            
-            % number of spanwise panels
-            obj.n_span=ceil(obj.b/y_max);
-            % number of chordwise panels
-            obj.n_chord=ceil(norm((obj.xyz_fixed(:,4)-obj.xyz_fixed(:,1))*0.5+(obj.xyz_fixed(:,3)-obj.xyz_fixed(:,2))*0.5)/x_max);
+            if isempty(obj.n_span)
+                % number of spanwise panels
+                obj.n_span=ceil(obj.b/y_max);
+                % number of chordwise panels
+                obj.n_chord=ceil(norm((obj.xyz_fixed(:,4)-obj.xyz_fixed(:,1))*0.5+(obj.xyz_fixed(:,3)-obj.xyz_fixed(:,2))*0.5)/x_max);
+            else
+                y_max = obj.b/obj.n_span;
+                x_max = norm((obj.xyz_fixed(:,4)-obj.xyz_fixed(:,1))*0.5+(obj.xyz_fixed(:,3)-obj.xyz_fixed(:,2))*0.5)/obj.n_chord;
+            end
             
             % compute span spacing vector
             %% TODO: optional use nonlinear cosine distribution of panels
@@ -1608,6 +1808,9 @@ classdef class_wingsegment
                 c_le_device_cs=[0 cumsum(obj.c_le_device)]/obj.c_r;
                 
                 relative_chord_pos_le=0;
+                
+                relative_chord_pos_prv=0;
+                skeleton_point_prv=0;
                 if(obj.has_le_cs)
                     for j=1:n_le_devices
                         % compute chord spacing
@@ -1615,12 +1818,20 @@ classdef class_wingsegment
                         r1=obj.xyz_le_device(j,:,1)+span_spacing(i)*(obj.xyz_le_device(j,:,2)-obj.xyz_le_device(j,:,1));
                         r2=obj.xyz_le_device(j,:,4)+span_spacing(i)*(obj.xyz_le_device(j,:,3)-obj.xyz_le_device(j,:,4));
                         for ii=1:length(chord_spacing_le)
+                            if ii>2
+                                relative_chord_pos_prv=relative_chord_pos_le;
+                                skeleton_point_prv=skeleton_point2;
+                            end
                             if obj.le_device.is_tapered==1
                                 relative_chord_pos_le=c_le_device_cs(j)+chord_spacing_le(ii)*obj.c_le_device(j)/obj.c_r;
                             else
                                 relative_chord_pos_le=c_le_device_cs(j)*obj.c_r/c_c+chord_spacing_le(ii)*obj.c_le_device(j)/c_c;
                             end
                             skeleton_point=obj.compute_skeleton_point(relative_chord_pos_le,span_spacing(i));
+                            skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos_le,relative_chord_pos_prv,skeleton_point_prv, span_spacing(i));
+%                           if evalin('base','type') == 2
+                                skeleton_point=skeleton_point2;
+%                           end
                             grid(:,k)=r1+chord_spacing_le(ii)*(r2-r1);
                             grid_flat(:,k)=grid(:,k);
                             
@@ -1645,6 +1856,17 @@ classdef class_wingsegment
                 for j=1:length(chord_spacing_ctr)
                     
                     relative_chord_pos=sum(obj.c_le_device)/c_c+chord_spacing_ctr(j)*(c_c-sum(obj.c_te_device)-sum(obj.c_le_device))/c_c;
+                    if j>2
+                        relative_chord_pos_prv=sum(obj.c_le_device)/c_c+chord_spacing_ctr(j-1)*(c_c-sum(obj.c_te_device)-sum(obj.c_le_device))/c_c;
+                        skeleton_point_prv=skeleton_point2;
+                        if obj.has_te_cs==1
+                            if obj.te_device.is_tapered==1
+                                %% careful only untapered te_device
+                                relative_chord_pos_prv=sum(obj.c_le_device)/c_c+chord_spacing_ctr(j-1)*(c_c-sum(obj.c_te_device)*c_c/obj.c_r-sum(obj.c_le_device))/c_c;
+                            end
+                        end
+                    end
+                    
                     if obj.has_te_cs==1
                         if obj.te_device.is_tapered==1
                             %% careful only untapered te_device
@@ -1652,6 +1874,11 @@ classdef class_wingsegment
                         end
                     end
                     skeleton_point=obj.compute_skeleton_point(relative_chord_pos,span_spacing(i));
+                    
+                    skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos,relative_chord_pos_prv,skeleton_point_prv, span_spacing(i));
+%                   if evalin('base','type') == 2
+                        skeleton_point=skeleton_point2;
+%                   end
                     grid(:,k)=r1+chord_spacing_ctr(j)*(r2-r1);
                     grid_flat(:,k)=grid(:,k);
                     if grid3D==1
@@ -1675,12 +1902,21 @@ classdef class_wingsegment
                         r1=obj.xyz_te_device(j,:,1)+span_spacing(i)*(obj.xyz_te_device(j,:,2)-obj.xyz_te_device(j,:,1));
                         r2=obj.xyz_te_device(j,:,4)+span_spacing(i)*(obj.xyz_te_device(j,:,3)-obj.xyz_te_device(j,:,4));
                         for ii=1:length(chord_spacing_te)
+                            if ii>2
+                                relative_chord_pos_prv=relative_chord_pos;
+                                skeleton_point_prv=skeleton_point2;
+                            end
                             if obj.te_device.is_tapered==1
                                 relative_chord_pos=c_te_device_cs(j)+chord_spacing_te(ii)*sum(obj.c_te_device(j))/obj.c_r+sum(obj.c_le_device)/c_c+(c_c-sum(obj.c_te_device)*c_c/obj.c_r-sum(obj.c_le_device))/c_c;
                             else
                                 relative_chord_pos=c_te_device_cs(j)*obj.c_r/c_c+chord_spacing_te(ii)*sum(obj.c_te_device(j))/c_c+sum(obj.c_le_device)/c_c+(c_c-sum(obj.c_te_device)-sum(obj.c_le_device))/c_c;
                             end
                             skeleton_point=obj.compute_skeleton_point(relative_chord_pos,span_spacing(i));  
+                            skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos,relative_chord_pos_prv,skeleton_point_prv,span_spacing(i));  
+
+%                           if evalin('base','type') == 2
+                                skeleton_point=skeleton_point2;
+%                           end
                             grid(:,k)=r1+chord_spacing_te(ii)*(r2-r1);
                             grid_flat(:,k)=grid(:,k);
                             if grid3D==1
@@ -1760,6 +1996,7 @@ classdef class_wingsegment
             obj.te_idx=te_idx;
         end
         
+        
         function skeleton_point=compute_skeleton_point(obj,relative_chord_pos,relative_span_pos)
             nprof_upper_t=obj.profile_t(1,1);
             nprof_lower_t=obj.profile_t(1,2);
@@ -1779,6 +2016,58 @@ classdef class_wingsegment
            % skeleton_line_r=obj.c_r*0.5*(interp1(coords_lower_r,profile_lower_r,relative_chord_pos,'lin','extrap')+interp1(coords_upper_r,profile_upper_r,relative_chord_pos,'lin','extrap'));
             skeleton_line_r=obj.c_r*0.5*(nakeinterp1(coords_lower_r,profile_lower_r,relative_chord_pos)+nakeinterp1(coords_upper_r,profile_upper_r,relative_chord_pos));
             skeleton_point=skeleton_line_r*(1-relative_span_pos)+skeleton_line_t*relative_span_pos;
+        end
+        function skeletonPoint=compute_skeleton_point_new(obj,relative_chord_pos,relative_chord_pos_prv,skeletonPointPrv,relative_span_pos)
+            nprof_upper_t=obj.profile_t(1,1);
+            nprof_lower_t=obj.profile_t(1,2);
+            coords_upper_t=obj.profile_t(2:1+nprof_upper_t,1);
+            profile_upper_t=obj.profile_t(2:1+nprof_upper_t,2);
+            coords_lower_t=obj.profile_t(2+nprof_upper_t:1+nprof_upper_t+nprof_lower_t,1);
+            profile_lower_t=obj.profile_t(2+nprof_upper_t:1+nprof_upper_t+nprof_lower_t,2);
+            if ~isequal(coords_upper_t,coords_lower_t)
+                lower_xOld=coords_lower_t;
+                lower_yOld=profile_lower_t;
+                profile_lower_t=[];
+                coords_lower_t=coords_upper_t;
+                for iPoint=1:length(coords_upper_t)
+                    profile_lower_t(iPoint,1)=nakeinterp1(lower_xOld,lower_yOld,coords_lower_t(iPoint));
+                end
+            end
+                camberline_t=(profile_upper_t+profile_lower_t)/2;
+                coords_camberline_t=coords_lower_t;
+                slope_t=diff(camberline_t)./diff(coords_camberline_t);
+                coords_slope_t=(coords_camberline_t(1:end-1)+coords_camberline_t(2:end))/2;
+            slope_pos=3/4*(relative_chord_pos-relative_chord_pos_prv)+relative_chord_pos_prv;
+            slope_p_t=nakeinterp1(coords_slope_t,slope_t,slope_pos);
+            skeletonPointT=slope_p_t*(relative_chord_pos-relative_chord_pos_prv);
+           skeleton_line_t=obj.c_t*0.5*(interp1(coords_lower_t,profile_lower_t,relative_chord_pos,'lin','extrap')+interp1(coords_upper_t,profile_upper_t,relative_chord_pos,'lin','extrap'));
+            
+             skeleton_line_t=obj.c_t*0.5*(nakeinterp1(coords_lower_t,profile_lower_t,relative_chord_pos)+nakeinterp1(coords_upper_t,profile_upper_t,relative_chord_pos));
+            nprof_upper_r=obj.profile_r(1,1);
+            nprof_lower_r=obj.profile_r(1,2);
+            coords_upper_r=obj.profile_r(2:1+nprof_upper_r,1);
+            profile_upper_r=obj.profile_r(2:1+nprof_upper_r,2);
+            coords_lower_r=obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,1);
+            profile_lower_r=obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,2);
+            if ~isequal(coords_upper_r,coords_lower_r)
+                lower_xOld=coords_lower_r;
+                lower_yOld=profile_lower_r;
+                coords_lower_r=coords_upper_r;
+                profile_lower_r=[];
+                for iPoint=1:length(coords_upper_r)
+                    profile_lower_r(iPoint,1)=nakeinterp1(lower_xOld,lower_yOld,coords_lower_r(iPoint));
+                end
+            end
+                camberline_r=(profile_upper_r+profile_lower_r)/2;
+                coords_camberline_r=coords_lower_r;
+                slope_r=diff(camberline_r)./diff(coords_camberline_r);
+                coords_slope_r=(coords_camberline_r(1:end-1)+coords_camberline_r(2:end))/2;
+            slope_p_r=nakeinterp1(coords_slope_r,slope_r,slope_pos);
+            skeletonPointR=slope_p_r*(relative_chord_pos-relative_chord_pos_prv);
+            skeleton_line_r=obj.c_r*0.5*(interp1(coords_lower_r,profile_lower_r,relative_chord_pos,'lin','extrap')+interp1(coords_upper_r,profile_upper_r,relative_chord_pos,'lin','extrap'));
+             skeleton_line_r=obj.c_r*0.5*(nakeinterp1(coords_lower_r,profile_lower_r,relative_chord_pos)+nakeinterp1(coords_upper_r,profile_upper_r,relative_chord_pos));
+%             skeletonPoint=skeleton_line_r*(1-relative_span_pos)+skeleton_line_t*relative_span_pos;
+             skeletonPoint=(obj.c_r*skeletonPointR*(1-relative_span_pos)+obj.c_t*skeletonPointT*relative_span_pos)+skeletonPointPrv;
         end
         function skeletonAngle=compute_skeleton_angle(obj,relative_chord_pos,relative_chord_pos_0,relative_chord_pos_1,relative_span_pos)
             %relative_chord_pos_0: leading edge of the panel
@@ -2062,9 +2351,10 @@ classdef class_wingsegment
                 obj=obj.compute_segment_coordinates();
                 
             else
-                fprintf('Unknown Data Format');
+                fprintf('Unknown Data Format: %s \n', xmlstruct.tag);
             end
         end
+
         function obj=  computeControlSurfacePanelIds(obj)
             if obj.has_te_cs
                 obj.te_device.panelIds=zeros(1,obj.n_span*obj.n_te_panels);

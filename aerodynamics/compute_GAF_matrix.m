@@ -5,7 +5,7 @@
 % 
 % This file is part of dAEDalusNXT (https://github.com/seyk86/dAEDalusNXT)
 %
-function [Q,Q_0] = compute_GAF_matrix(k,nmod,aircraft,aircraft_structure,state,name,UVLM_settings,exag,varargin)
+function [Q,Q_0,GAF_Vb] = compute_GAF_matrix(k,nmod,aircraft,aircraft_structure,state,name,UVLM_settings,exag,varargin)
 %check if model is constrained
 if aircraft_structure.modefrequencies(7)/aircraft_structure.modefrequencies(6)>100
     free_modes=1;
@@ -228,8 +228,8 @@ mkdir(aircraft.name)
 if free_modes==1
     aircraft_structure=aircraft_structure_back;
 end
-
-save([aircraft.name '/' name],'Q','Q_0','k','aircraft_structure','aircraft','-v7.3');
+GAF_Vb=state.V_inf;
+save([aircraft.name '/' name],'Q','Q_0','k','aircraft_structure','aircraft','GAF_Vb','-v7.3');
 
 
 

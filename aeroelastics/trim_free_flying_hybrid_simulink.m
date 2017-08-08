@@ -5,7 +5,7 @@
 % 
 % This file is part of dAEDalusNXT (https://github.com/seyk86/dAEDalusNXT)
 %
-function [trimstate,trimreport,mean_axis_origin]=trim_free_flying_hybrid_simulink(aircraft,aircraft_structure,Aircraft,AeroelasticSSM,trim_state)
+function [trimstate,trimreport,mean_axis_origin]=trim_free_flying_hybrid_simulink(aircraft,aircraft_structure,Aircraft,AeroelasticSSM,trim_state,GAF_Vb)
 
 %% generate required paths for program execution
 aircraft.weights.W= sum(aircraft_structure.Mff(1:6:end));
@@ -30,7 +30,7 @@ Trim_State.AircraftState.m=M_tot_mean(1,1);
 Trim_State.AircraftState.Ixyz=Aircraft.Inertia;
 Trim_State.VCAS=trim_state.aerodynamic_state.V_A;
 Trim_State.Alpha=trim_state.aerodynamic_state.alpha;
-Trim_State.Euler=[0 trim_state.aerodynamic_state.alpha*pi/180 0];
+Trim_State.Euler=[0 trim_state.aerodynamic_state.alpha 0];
 Trim_State.rho=trim_state.aerodynamic_state.rho_air;
 Trim_State.AircraftState.Trim_Deflection=0;
 Trim_State.AircraftState.DeltaThr=0;
@@ -38,6 +38,7 @@ Trim_State.AircraftState.Conf=0;
 Trim_State.AeroelasticState=0;
 Trim_State.x_stat_ms=AeroelasticSSM.msASee^-1*1/2*trim_state.aerodynamic_state.rho_air*trim_state.aerodynamic_state.V_A^2*aircraft.reference.S_ref*[zeros(AeroelasticSSM.nE,1);AeroelasticSSM.Q_0(7:6+AeroelasticSSM.nE,1);zeros(size(AeroelasticSSM.msASre(:,:),1)-2*AeroelasticSSM.nE,1)];
 Trim_State.AeroelasticityActive=1;
+Trim_State.GAF_Vb=GAF_Vb;
 Environment.ACTIVATE_GUST=0;
 Environment.ATMOSPHERE_g=9.81;
 SimMode=0;

@@ -85,7 +85,7 @@ for i=1:length(Models)
 h(i)=plot(Models{i}.Time,Models{i}.Alpha*180/pi);
 end
 eval(legendtxt)
-ylabel('Alpha [ï¿½]')
+ylabel('Alpha [°]')
 xlabel('t [s]')
 
 figure

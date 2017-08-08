@@ -25,8 +25,7 @@ function obj=elM_lumped_6dof(obj)
    else
        rho_t=obj.m/obj.A;
    end
-   massless=0;
-   if massless
+   if obj.is_massless
        obj.m=0;
        rho_t=obj.m/obj.A;
    end
@@ -73,7 +72,7 @@ function obj=elM_lumped_6dof(obj)
         0,      0,      0,      0,      0,  0;];
         
     obj.elM_lumped=m/2*[Q1,Q2;Q2,Q4];
-   if massless
+   if obj.is_massless
         obj.elM_lumped(isnan(obj.elM_lumped))=0;
     end
     % Calculate Element Mass Matrices in Global Coordinates

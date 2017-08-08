@@ -177,9 +177,9 @@ void compute_influence_vring(double *grid,double *panels, double *colloc,double 
                     wAB_3=wAB_3-r1xr2_3/(norm_r1xr2*norm_r1xr2)*dotp_r0_r1dr2;
                 }
                 else
-                {
-                mexPrintf("no influence i j k %d %d %d\n",i,j,k);
-                }
+            //    {
+            //    mexPrintf("no influence i j k %d %d %d\n",i,j,k);
+             //   }
             }
             if (doomed==1){
              //wAB_1=0;

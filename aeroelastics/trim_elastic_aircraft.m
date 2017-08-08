@@ -23,7 +23,7 @@ total_mass = aircraft_structure.f_compute_totalMass;
 mean_axis_origin = aircraft_structure.f_compute_CG;
 
 [s_inertial,delta_inertial,I_Hat,b,b_Hat_Skew,omega_Hat_Skew,A_Bar]=compute_eqm_matrices_mean([0 0 0]',[0 0 0]',aircraft_structure.node_coords,aircraft_structure.nodal_deflections,mean_axis_origin,[0 0 0]');
-[M_tot_mean,K_tot_mean,F_tot_mean]=compute_mean_axis_modal_matrices(A_Bar,I_Hat,b,b_Hat_Skew,omega_Hat_Skew,aircraft_structure.Mff_lumped,aircraft_structure.Kff,aircraft_structure.modeshapes,length(aircraft_structure.Kff),zeros(length(aircraft_structure.Kff),1));
+[M_tot_mean,K_tot_mean,F_tot_mean]=compute_mean_axis_modal_matrices(A_Bar,I_Hat,b,b_Hat_Skew,omega_Hat_Skew,aircraft_structure.Mff,aircraft_structure.Kff,aircraft_structure.modeshapes,length(aircraft_structure.Kff),zeros(length(aircraft_structure.Kff),1));
     
 %aeroelastic_solver_settings=class_aeroelastic_solver_settings;
 

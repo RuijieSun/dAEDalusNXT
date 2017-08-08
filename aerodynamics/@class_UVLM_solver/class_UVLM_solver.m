@@ -141,8 +141,11 @@ classdef class_UVLM_solver
         r_cs;
         % vector with lever arms from fvap to hinge axis (inner hinge point)
         r_css;
-        % transformation matrices which transform the overall force vector to the hinge moments
+        % transformation matrices which transforms a motion of the control
+        % surface to the boundary condition
         Rcs;
+        % transformation matrices which transform the overall force vector to the hinge moments
+        Rcss;
         % matrix containing the skew symmetric matrices of the hinge axes
         Khat;
         
@@ -263,6 +266,8 @@ classdef class_UVLM_solver
         
         %state space representation (class_UVLM_SSM)
         ssm
+        csNames;
+        gustZones;
     end
     
     methods
@@ -278,16 +283,74 @@ classdef class_UVLM_solver
         obj=initialize_time_domain_solution(obj,t_step);
         obj=solve_time_domain_aerodynamics(obj,aircraft,x_body,V,alpha,beta,pqr,rho_air,itr,approach);
 
-        function obj=class_UVLM_solver(name,grid,is_te,panels,state,grid_wake,panels_wake,reference,settings,varargin)
-            
-            if nargin==9    %<- dirty, find workaround to specify control surfaces within UVLM, maybe uvlm.addHingeOutput
+        function obj=class_UVLM_solver(varargin)
+            %% determine input type
+            if nargin==3 %< aircraft is passed as an input
+                aircraft=varargin{1};
+                state=varargin{2};
+                settings=varargin{3};
+               
+                name=aircraft.name;
+                grid=aircraft.grid_deflected;
+                is_te=aircraft.is_te;
+                panels=aircraft.panels;
+                grid_wake=aircraft.grid_wake;
+                panels_wake=aircraft.panels_wake;
+                reference=aircraft.reference;
+                obj.csNames={};
+                csPanelIds={};
+                csHingePoints=[];
+                csHingeAxes=[];
+                iCs=0;
+                for iWing=1:length(aircraft.wings)
+                    for iSeg=1:length(aircraft.wings(iWing).wing_segments)
+                         if aircraft.wings(iWing).wing_segments(iSeg).has_te_cs
+                             
+                            iCs=iCs+1;
+                            obj.csNames{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).te_device.name];
+                            csPanelIds{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).te_device.panelIds];
+                            csHingePoints=[csHingePoints; aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1); ];
+                            csHingeAxes=[csHingeAxes; (aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1))/norm((aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1)));];
+                            if and(aircraft.wings(iWing).wing_segments(iSeg).te_device.is_sym, aircraft.wings(iWing).symmetric)
+                                iCs=iCs+1;
+                                obj.csNames{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).te_device.name '_l'];
+                                csPanelIds{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).te_device.panelIdsL];
+                                csHingePoints=[csHingePoints; [1 -1 1].*aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1); ];
+                                csHingeAxes=[csHingeAxes; [1 -1 1].*(aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1))/norm((aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1)));];
+                            end
+                         end
+                    end
+                end
+                
+                obj.gustZones=aircraft.gustZones;
+            elseif nargin==9    %< old style
+                name=varargin{1};
+                grid=varargin{2};
+                is_te=varargin{3};
+                panels=varargin{4};
+                state=varargin{5};
+                grid_wake=varargin{6};
+                panels_wake=varargin{7};
+                reference=varargin{8};
+                settings=varargin{9};
                 csPanelIds=[];
                 csHingePoints=[];
                 csHingeAxes=[];
-            elseif nargin==12
-                csPanelIds=varargin{1};
-                csHingePoints=varargin{2};
-                csHingeAxes=varargin{3};
+                obj.gustZones=[];
+            elseif nargin==12 %< old style with control surfaces
+                name=varargin{1};
+                grid=varargin{2};
+                is_te=varargin{3};
+                panels=varargin{4};
+                state=varargin{5};
+                grid_wake=varargin{6};
+                panels_wake=varargin{7};
+                reference=varargin{8};
+                settings=varargin{9};
+                csPanelIds=varargin{10};
+                csHingePoints=varargin{11};
+                csHingeAxes=varargin{12};
+                obj.gustZones=[];
             end
             obj.case_name=name;
             
@@ -296,7 +359,7 @@ classdef class_UVLM_solver
             obj.state=state;
             obj.rho=state.rho_air;
             obj.Ma_corr=sqrt(1-state.Ma^2);
-            obj.Ma_corr=1;
+%              obj.Ma_corr=1;
             
             %% TODO: Ma correction
             % obj.Ma_corr=1;%sqrt(1-state.Ma^2);
@@ -326,14 +389,16 @@ classdef class_UVLM_solver
             Rhat=zeros(length(obj.panels)*3,length(obj.panels)*3);
             obj.Khat=zeros(3*length(obj.panels),3*length(obj.panels),nCs);
             for iCs=1:nCs
-                obj.r_cs(:,csPanelIds{iCs},iCs)=obj.r_dwn(:,csPanelIds{iCs})-csHingePoints(iCs,:)';
-                obj.r_css(:,csPanelIds{iCs},iCs)=obj.r(:,csPanelIds{iCs})-csHingePoints(iCs,:)';
+                obj.r_cs(:,csPanelIds{iCs},iCs)=obj.r_dwn(:,csPanelIds{iCs})-repmat((csHingePoints(iCs,:)'-obj.state.p_ref'),1,length(csPanelIds{iCs}));
+                obj.r_css(:,csPanelIds{iCs},iCs)=obj.r(:,csPanelIds{iCs})-repmat((csHingePoints(iCs,:)'-obj.state.p_ref'),1,length(csPanelIds{iCs}));
                 index=sort([(csPanelIds{iCs}-1)*3+1 (csPanelIds{iCs}-1)*3+2 (csPanelIds{iCs}-1)*3+3]);
                 obj.Khat(index,index,iCs)=kron(eye(length(csPanelIds{iCs})),[0 -csHingeAxes(iCs,3) csHingeAxes(iCs,2);csHingeAxes(iCs,3) 0 -csHingeAxes(iCs,1); -csHingeAxes(iCs,2) csHingeAxes(iCs,1) 0;]);
                 for iPanel=1:length(obj.panels)
                     Rhat((iPanel-1)*3+1:iPanel*3,(iPanel-1)*3+1:iPanel*3)=[0 -obj.r_cs(3,iPanel,iCs) obj.r_cs(2,iPanel,iCs);obj.r_cs(3,iPanel,iCs) 0 -obj.r_cs(1,iPanel,iCs);-obj.r_cs(2,iPanel,iCs) obj.r_cs(1,iPanel,iCs) 0;];
+                    RhatS((iPanel-1)*3+1:iPanel*3,(iPanel-1)*3+1:iPanel*3)=[0 -obj.r_css(3,iPanel,iCs) obj.r_css(2,iPanel,iCs);obj.r_css(3,iPanel,iCs) 0 -obj.r_css(1,iPanel,iCs);-obj.r_css(2,iPanel,iCs) obj.r_css(1,iPanel,iCs) 0;];
                 end
                 obj.Rcs(iCs,:)=repmat(csHingeAxes(iCs,:),1,length(obj.panels))*Rhat;
+                obj.Rcss(iCs,:)=repmat(csHingeAxes(iCs,:),1,length(obj.panels))*RhatS;
             end
             
             if obj.Ma_corr<1
@@ -410,7 +475,46 @@ classdef class_UVLM_solver
                 end
             end
         end
-        
+        function obj=initialize_vring_grid_SSM(obj,t_step)
+            grid_wake=[];
+            
+            wake_start=0.25;
+            % compute actual grid (vring grid)
+            is_done=zeros(1,length(obj.grid));
+            for i=1:1:length(obj.panels)
+                if is_done(obj.panels(1,i))==0
+                    obj.grid_vring(:,obj.panels(1,i))=0.75*obj.grid(:,obj.panels(1,i))+0.25*obj.grid(:,obj.panels(4,i));
+                    is_done(obj.panels(1,i))=1;
+                end
+                if is_done(obj.panels(2,i))==0
+                    obj.grid_vring(:,obj.panels(2,i))=0.75*obj.grid(:,obj.panels(2,i))+0.25*obj.grid(:,obj.panels(3,i));
+                    is_done(obj.panels(2,i))=1;
+                end
+                if is_done(obj.panels(4,i))==0
+                    if obj.is_te(i)==0
+                        obj.grid_vring(:,obj.panels(4,i))=obj.grid(:,obj.panels(4,i))+0.25*(obj.grid(:,obj.panels(4,i+1))-obj.grid(:,obj.panels(1,i+1)));
+                        is_done(obj.panels(4,i))=1;
+                    else
+                        %change this for SSM
+                        %obj.grid_vring(:,obj.panels(4,i))=obj.grid(:,obj.panels(4,i))+wake_start*norm(obj.Uinf)*t_step*(obj.grid(:,obj.panels(4,i))-obj.grid(:,obj.panels(1,i)))/norm((obj.grid(:,obj.panels(4,i))-obj.grid(:,obj.panels(1,i))));
+                        obj.grid_vring(:,obj.panels(4,i))=obj.grid(:,obj.panels(4,i));
+                        is_done(obj.panels(4,i))=1;
+                        %grid_wake=[grid_wake obj.grid_vring(:,obj.panels(4,i))];
+                    end
+                end
+                if is_done(obj.panels(3,i))==0
+                    if obj.is_te(i)==0
+                        obj.grid_vring(:,obj.panels(3,i))=obj.grid(:,obj.panels(3,i))+0.25*(obj.grid(:,obj.panels(3,i+1))-obj.grid(:,obj.panels(2,i+1)));
+                        is_done(obj.panels(3,i))=1;
+                    else
+                        %obj.grid_vring(:,obj.panels(3,i))=obj.grid(:,obj.panels(3,i))+wake_start*norm(obj.Uinf)*t_step*(obj.grid(:,obj.panels(3,i))-obj.grid(:,obj.panels(2,i)))/norm((obj.grid(:,obj.panels(3,i))-obj.grid(:,obj.panels(2,i))));
+                        obj.grid_vring(:,obj.panels(3,i))=obj.grid(:,obj.panels(3,i));
+                        is_done(obj.panels(3,i))=1;
+                        %grid_wake=[grid_wake obj.grid_vring(:,obj.panels(3,i))];
+                    end
+                end
+            end
+        end
         function obj=initialize_wake_grid(obj,n_step,t_step)
             
             %grid_wake=obj.grid_wake_init;
@@ -523,6 +627,193 @@ classdef class_UVLM_solver
             for i=0:1:n_step
                 for j=1:length(jump_idx_grid)-1
                     next_row=grid_wake(:,(jump_idx_grid(j)+1):(jump_idx_grid(j)+(jump_idx_grid(j+1)-jump_idx_grid(j))/2))*(1-i*obj.t_step/(obj.t_step*n_step))+grid_wake(:,(jump_idx_grid(j)+(jump_idx_grid(j+1)-jump_idx_grid(j))/2+1):(jump_idx_grid(j)+(jump_idx_grid(j+1)-jump_idx_grid(j))))*(i*obj.t_step/(obj.t_step*n_step));
+                    %obj.grid_wake=[obj.grid_wake next_row];
+                    %next_row(1,:)=next_row(1,:)/obj.Ma_corr;
+                    test_wake=[test_wake next_row];
+                end
+            end
+            
+            %             if obj.Ma_corr<1
+            %                 test_wake(1,:)=test_wake(1,:)/obj.Ma_corr;
+            %             end
+            
+            obj.grid_wake=test_wake;
+            
+            obj.grid_wake_old=test_wake;
+            panel_row=obj.panels_wake;
+            first_row=obj.panels_wake;
+            
+            first_row(3:4,:)=first_row(3:4,:)+row_len;
+            
+            last_row=obj.panels_wake;
+            last_row(1:2,:)=first_row(1:2,:)+row_len*(1+n_step);
+            
+            obj.panels_wake=first_row;
+            k=0;
+            j=1;
+            n=0;
+            
+            for i=1:n_step*length(panel_row)
+                %if j~=length(jump_idx_panel)
+                if inv_wake_panel((i-n*(length(panel_row))))==0
+                    %if inv_wake_panel((i-n*(length(panel_row))))==0
+                    test_panels(1,i)=i+k;
+                    test_panels(2,i)=i+1+k;
+                    test_panels(3,i)=i+1+length(grid_wake)/2+k;
+                    test_panels(4,i)=i+length(grid_wake)/2+k;
+                else
+                    test_panels(1,i)=i+k+1;
+                    test_panels(2,i)=i+k;
+                    test_panels(3,i)=i+length(grid_wake)/2+k;
+                    test_panels(4,i)=i+length(grid_wake)/2+k+1;
+                end
+                if (i-n*(length(panel_row)))==jump_idx_panel(j)
+                    if j<length(jump_idx_panel)
+                        j=j+1;
+                        k=k+1;
+                    else
+                        j=1;
+                        k=k+1;
+                        n=n+1;
+                    end
+                end
+            end
+            
+            obj.panels_wake=test_panels;%[obj.panels_wake last_row];
+            % initialize time marching matrices
+            obj.Cbb=zeros(size(obj.panels_wake,2),size(obj.panels,2));
+            k=1;
+            for i=1:size(obj.panels,2)
+                if obj.is_te(i)==1
+                    %len_b=norm(obj.grid(:,obj.panels(2,i))-obj.grid(:,obj.panels(1,i)))+norm(obj.grid(:,obj.panels(3,i))-obj.grid(:,obj.panels(2,i)))+norm(obj.grid(:,obj.panels(4,i))-obj.grid(:,obj.panels(3,i)))+norm(obj.grid(:,obj.panels(1,i))-obj.grid(:,obj.panels(4,i)));
+                    %len_w=norm(obj.grid_wake(:,obj.panels_wake(2,k))-obj.grid_wake(:,obj.panels_wake(1,k)))+norm(obj.grid_wake(:,obj.panels_wake(3,k))-obj.grid_wake(:,obj.panels_wake(2,k)))+norm(obj.grid_wake(:,obj.panels_wake(4,k))-obj.grid_wake(:,obj.panels_wake(3,k)))+norm(obj.grid_wake(:,obj.panels_wake(1,k))-obj.grid_wake(:,obj.panels_wake(4,k)));
+                    obj.Cbb(k,i)=1;
+                    k=k+1;
+                end
+            end
+%            obj.Cbw=zeros(length(obj.panels_wake),length(obj.panels_wake));
+%            for i=1:length(obj.panels_wake)-panel_len
+%                obj.Cbw(i+panel_len,i)=1;
+%            end
+            obj.panel_len=panel_len;
+        end
+        function obj=initialize_wake_grid_SSM(obj,n_step,t_step)
+            
+            %grid_wake=obj.grid_wake_init;
+            obj.grid_wake=[];%obj.grid_wake_init;
+            panels_wake=obj.panels_wake_init;
+            obj.panels_wake=[];%obj.panels_wake_init;
+            
+            % set wake
+            obj.n_step=n_step;
+            obj.t_step=t_step;
+            
+            idx_1_prv=1;
+            idx_2_prv=0;
+            grid_te_line=[];
+            prv_jump_idx=0;
+            for i=1:1:length(obj.panels)
+                if obj.is_te(i)
+                    if i==1
+                        idx_1_prv=obj.panels(3,i);
+                        idx_2_prv=obj.panels(4,i);
+                        if obj.panels(3,i)>obj.panels(4,i)
+                            grid_te_line=[grid_te_line obj.grid_vring(:,obj.panels(4,i)) obj.grid_vring(:,obj.panels(3,i))];
+                        else
+                            grid_te_line=[grid_te_line obj.grid_vring(:,obj.panels(3,i)) obj.grid_vring(:,obj.panels(4,i))];
+                        end
+                    else
+                        if obj.panels(3,i)>obj.panels(4,i)
+                            if obj.panels(4,i)==idx_1_prv
+                                grid_te_line=[grid_te_line obj.grid_vring(:,obj.panels(3,i))];
+                            else
+                                if prv_jump_idx==0
+                                    grid_te_line=[grid_te_line  obj.grid_vring(:,obj.panels(4,i))  obj.grid_vring(:,obj.panels(3,i))];
+                                else
+                                    grid_te_line=[grid_te_line  grid_te_line(:,prv_jump_idx:end)  obj.grid_vring(:,obj.panels(4,i))  obj.grid_vring(:,obj.panels(3,i))];
+                                end
+                                prv_jump_idx=size(grid_te_line,2)-1;
+                            end
+                        else
+                            if obj.panels(3,i)==idx_2_prv
+                                grid_te_line=[grid_te_line  obj.grid_vring(:,obj.panels(4,i))];
+                            else
+                                if prv_jump_idx==0
+                                    grid_te_line=[grid_te_line  obj.grid_vring(:,obj.panels(3,i)) obj.grid_vring(:,obj.panels(4,i))];
+                                else
+                                    grid_te_line=[grid_te_line grid_te_line(:,prv_jump_idx:end)  obj.grid_vring(:,obj.panels(3,i)) obj.grid_vring(:,obj.panels(4,i))];
+                                end
+                                prv_jump_idx=size(grid_te_line,2)-1;
+                            end
+                            
+                        end
+                        idx_1_prv=obj.panels(3,i);
+                        idx_2_prv=obj.panels(4,i);
+                    end
+                end
+            end
+            grid_te_line=[grid_te_line grid_te_line(:,prv_jump_idx:end)];
+            
+            obj.grid_wake=grid_te_line;
+            
+            obj.panels_wake=panels_wake;
+            
+            is_done=zeros(1,length(obj.grid_wake));
+            
+            for i=1:length(obj.panels_wake)
+                if is_done(obj.panels_wake(3,i))==0
+                    %obj.grid_wake(:,obj.panels_wake(3,i))=obj.grid_wake(:,obj.panels_wake(3,i))+[obj.Uinf(1)/obj.Ma_corr 0 0]'*obj.t_step*n_step;
+                    obj.grid_wake(:,obj.panels_wake(3,i))=obj.grid_wake(:,obj.panels_wake(3,i))+[obj.Uinf(1) 0 0]'*obj.t_step*n_step;
+                    is_done(obj.panels_wake(3,i))=1;
+                end
+                if is_done(obj.panels_wake(4,i))==0
+                    %obj.grid_wake(:,obj.panels_wake(4,i))=obj.grid_wake(:,obj.panels_wake(4,i))+[obj.Uinf(1)/obj.Ma_corr 0 0]'*obj.t_step*n_step;
+                    obj.grid_wake(:,obj.panels_wake(4,i))=obj.grid_wake(:,obj.panels_wake(4,i))+[obj.Uinf(1) 0 0]'*obj.t_step*n_step;
+                    is_done(obj.panels_wake(4,i))=1;
+                end
+            end
+            
+            jump_idx_grid=0;
+            jump_idx_panel=[];
+            
+            inv_wake_panel=zeros(length(panels_wake),1);
+            
+            for i=1:length(panels_wake)
+                if panels_wake(3,i)>panels_wake(4,i)
+                    inv_wake_panel(i)=0;
+                else
+                    inv_wake_panel(i)=1;
+                end
+            end
+            
+            for i=1:length(panels_wake)-1
+                if abs(panels_wake(1,i)-panels_wake(1,i+1))>1.5
+                    jump_idx_panel=[jump_idx_panel i];
+                    if panels_wake(3,i)>panels_wake(4,i)
+                        jump_idx_grid=[jump_idx_grid panels_wake(3,i)];
+                    else
+                        jump_idx_grid=[jump_idx_grid panels_wake(4,i)];
+                    end
+                end
+            end
+            
+            jump_idx_grid=[jump_idx_grid length(obj.grid_wake)];
+            jump_idx_panel=[jump_idx_panel length(obj.panels_wake)];
+            
+            grid_wake=obj.grid_wake;
+            row_len=size(grid_wake,2)/2;
+            obj.row_length=row_len;
+            panel_len=size(panels_wake,2);
+
+                        
+         test_wake=[];
+         fact=cumsum([0 0.25 ones(1,obj.settings.nFixedWakePanels) obj.settings.wakeGrowthFactor.^(1:n_step-2-obj.settings.nFixedWakePanels) obj.settings.wakeGrowthFactor.^(n_step+1-2-obj.settings.nFixedWakePanels)+ obj.settings.addLengthFactorLastPanel/obj.settings.wakelength_factor*n_step]/n_step);
+            for i=0:1:n_step
+                for j=1:length(jump_idx_grid)-1
+                    endrow=grid_wake(:,(jump_idx_grid(j)+(jump_idx_grid(j+1)-jump_idx_grid(j))/2+1):(jump_idx_grid(j)+(jump_idx_grid(j+1)-jump_idx_grid(j))));
+                    startrow=obj.grid_wake(:,(jump_idx_grid(j)+1):(jump_idx_grid(j)+(jump_idx_grid(j+1)-jump_idx_grid(j))/2));
+%                     fact=((i)*obj.t_step/(obj.t_step*n_step));
+                    next_row=startrow+(endrow-startrow)*fact(i+1);
                     %obj.grid_wake=[obj.grid_wake next_row];
                     %next_row(1,:)=next_row(1,:)/obj.Ma_corr;
                     test_wake=[test_wake next_row];
@@ -716,6 +1007,7 @@ classdef class_UVLM_solver
 %         
         function obj=compute_colloc_points(obj)
             obj.colloc=0.125*obj.grid(:,obj.panels(1,:))+0.125*obj.grid(:,obj.panels(2,:))+0.375*obj.grid(:,obj.panels(3,:))+0.375*obj.grid(:,obj.panels(4,:));
+            obj.r_mid=0.25*obj.grid(:,obj.panels(1,:))+0.25*obj.grid(:,obj.panels(2,:))+0.25*obj.grid(:,obj.panels(3,:))+0.25*obj.grid(:,obj.panels(4,:));
             obj.fvap=0.375*obj.grid(:,obj.panels(1,:))+0.375*obj.grid(:,obj.panels(2,:))+0.125*obj.grid(:,obj.panels(3,:))+0.125*obj.grid(:,obj.panels(4,:));
             for i=1:1:length(obj.panels)
                 % obj.colloc(:,i)=0.25*obj.grid_vring(:,obj.panels(1,i))+0.25*obj.grid_vring(:,obj.panels(2,i))+0.25*obj.grid_vring(:,obj.panels(3,i))+0.25*obj.grid_vring(:,obj.panels(4,i));
@@ -1556,7 +1848,43 @@ classdef class_UVLM_solver
                 obj.C_modes=zeros(obj.settings.n_mode,length(obj.t_vec));
             end
         end
-        
+        function obj=initialize_unsteady_computation_SSM(obj)
+            
+            % initialize bound and wake grid
+            obj=obj.initialize_vring_grid_SSM(obj.t_step);
+            
+            % compute required number of streamwise wake panels
+            n_wake=obj.settings.wakelength_factor*obj.reference.b_ref/(obj.t_step*norm(obj.Uinf));
+            
+            obj=obj.initialize_wake_grid_SSM(ceil(n_wake),obj.t_step);
+            
+            % initialize vorticity vector for bound and wake grid
+            obj.Gamma_wake=zeros(length(obj.panels_wake),1);
+            obj.Gamma=zeros(length(obj.panels),1);
+            
+            % compute initial influence coefficient matrix
+            if isempty(obj.Abb)
+                obj=obj.compute_influence_coeff_matrix();
+            elseif(size(obj.Aww,2)~=length(obj.panels_wake))
+                obj=obj.compute_influence_coeff_matrix();
+            end
+            % initialize variables
+            
+            obj.CX=[];
+            obj.CY=[];
+            obj.CZ=[];
+            obj.Cl=[];
+            obj.CL=[];
+            obj.CM=[];
+            obj.CN=[];
+            obj.Cdi=[];
+            obj.Cdi2=[];
+            obj.alpha_s=[];
+            % initialization in case modal coefficients are desired
+            if obj.settings.modal_data==1
+                obj.C_modes=zeros(obj.settings.n_mode,length(obj.t_vec));
+            end
+        end
         function obj=initialize_wake_circulation_pqr(obj, dp,dq,dr)
             % here the wake circulation is initialized until a steady value
             % is reached
@@ -3071,6 +3399,7 @@ classdef class_UVLM_solver
                 
             else
                 add_args={nmod,aircraft};
+                ref_def=0;
             end
             obj=obj.initialize_unsteady_computation_settings(nargin-1,add_args);
             
@@ -3617,10 +3946,10 @@ classdef class_UVLM_solver
             CN=sum(obj.F_body(2,:).*obj.r(1,:)-obj.F_body(1,:).*obj.r(2,:))/(obj.qinf*obj.reference.S_ref*obj.reference.b_ref);
          %   obj.r(1,:)=obj.r(1,:)/obj.Ma_corr;
          
-            for iCs=1:size(obj.Rcs,1)
-                CH(iCs,1)=obj.Rcs(iCs,:)*reshape(obj.F_body,3*length(obj.panels),1)./(obj.qinf*obj.reference.S_ref);
+            for iCs=1:size(obj.Rcss,1)
+                CH(iCs,1)=obj.Rcss(iCs,:)*reshape(obj.F_body,3*length(obj.panels),1)./(obj.qinf*obj.reference.S_ref);
             end
-            if ~isempty(obj.Rcs)
+            if ~isempty(obj.Rcss)
                 obj.CH=[obj.CH CH];
             end
             obj.CX=[obj.CX CX];
@@ -3689,26 +4018,26 @@ classdef class_UVLM_solver
             
             obj.Uinf=a2bf(norm(obj.Uinf),alpha_0,obj.state.beta,obj.Ma_corr);
             obj=obj.f_solve();
-            Cl_1=obj.CZ;
+            Cl_1=obj.Cl(end);  %Wrong coeffcient was defined (6 occurences). Cl_target is in wind frame. 
             alpha_0=5;
             obj.Uinf=a2bf(norm(obj.Uinf),alpha_0,obj.state.beta,obj.Ma_corr);
             obj=obj.f_solve();
-            Cl_prev=obj.CZ;
+            Cl_prev=obj.Cl(end);
             dCLalpha=Cl_prev-Cl_1;
             dalpha=(Cl_target-Cl_prev)/dCLalpha;
             alpha=alpha_0+dalpha;
             obj.Uinf=a2bf(norm(obj.Uinf),alpha,obj.state.beta,obj.Ma_corr);
             obj=obj.f_solve();
-            dCLalpha=(obj.CZ-Cl_prev)/dalpha;
+            dCLalpha=(obj.Cl(end)-Cl_prev)/dalpha;
             i=1;
-            while abs(obj.CZ-Cl_target)>tolerance
-                Cl_prev=obj.CZ;
+            while abs(obj.Cl(end)-Cl_target)>tolerance
+                Cl_prev=obj.Cl(end);
                 dalpha=(Cl_target-Cl_prev)/dCLalpha;
                 alpha=alpha+dalpha;
                 obj.Uinf=a2bf(norm(obj.Uinf),alpha,obj.state.beta,obj.Ma_corr);
                 obj=obj.f_solve();
                 i=i+1;
-                dCLalpha=(obj.CZ-Cl_prev)/dalpha;
+                dCLalpha=(obj.Cl(end)-Cl_prev)/dalpha;
                 if i>30
                     sprintf('f_solve_for_Cl did not converge!')
                     break;
@@ -4012,7 +4341,7 @@ classdef class_UVLM_solver
         function obj=plot_cp(obj)
             
             for i=1:length(obj.panels)
-                handle= fill3(obj.grid(1,obj.panels(:,i))*obj.Ma_corr, obj.grid(2,obj.panels(:,i)),obj.grid(3,obj.panels(:,i)),obj.cp(i)*obj.area(i));
+                handle= fill3(obj.grid(1,obj.panels(:,i))*obj.Ma_corr, obj.grid(2,obj.panels(:,i)),obj.grid(3,obj.panels(:,i)),obj.cp(i));
                 hold on
             end
             axis equal
@@ -4576,32 +4905,21 @@ classdef class_UVLM_solver
             
             disp('Preparing UVLM for SSM Generation')
             %% prepare solver for SSM
-            solverForSSM=obj;
+            % wake discretization factor (2 means double density of panels
+            % within the wake)
+            fact=obj.settings.wakePanelDensity;
             % calculate required timestep
-            tStep=diff(obj.grid(1,obj.panels(2:3,1)))/norm(obj.Uinf);
+            tStep=1/fact*diff(obj.grid(1,obj.panels(2:3,1)))/norm(obj.Uinf);
             % set timestep according to discretization
             %copy obj before grid modification
-            solverForSSM.t_step=tStep;
+            obj.t_step=tStep;
             %initialize computation <- why? because of new timestep?                            <-TODO
             %redo so that AIC is only computed once! saves 50% of the time
             %oO
-            solverForSSM=solverForSSM.initialize_unsteady_computation();
-            %number of spanwise panels
-            nS=sum(solverForSSM.is_te);
-            %number of chordwise panels
-            nC=length(solverForSSM.Abb)/nS;
-            %xW describes the spacing of the wake grid
-            xW=solverForSSM.grid_wake(1,solverForSSM.panels_wake(1,1+nS))-solverForSSM.grid_wake(1,solverForSSM.panels_wake(1,1));
-            
-            %the grid needs to be modified (small first wake panel)
-            solverForSSM.grid_wake(1,:)=solverForSSM.grid_wake(1,:)-xW*0.25;
-            solverForSSM.grid_wake(1,solverForSSM.row_length+1:end)=solverForSSM.grid_wake(1,solverForSSM.row_length+1:end)-xW*0.75;
-            solverForSSM.grid_vring(1,unique(solverForSSM.panels(3:4,find(solverForSSM.is_te))))=solverForSSM.grid_vring(1,unique(solverForSSM.panels(3:4,find(solverForSSM.is_te))))-0.25*xW;
-            %recompute influence coefficients with new grid
-            solverForSSM=solverForSSM.compute_influence_coeff_matrix();
-            obj=solverForSSM;
+            obj=obj.initialize_unsteady_computation_SSM();
+
             %% generate SSM with prepared solver instance
-            obj.ssm=class_UVLM_SSM(solverForSSM);
+            obj.ssm=class_UVLM_SSM(obj);
         end
     end
     

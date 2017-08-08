@@ -155,12 +155,14 @@ classdef class_beamelement
         crosssection;
         %> reference to beam to which the element belongs to
         ref_parent_beam;  
+        %> flag for massless beam elements
+        is_massless
         
 
     end
     
     methods
-        function obj =class_beamelement(crosssection,parent_ref)
+        function obj =class_beamelement(crosssection, parent_ref)
             obj.crosssection=crosssection;
             obj.ref_parent_beam=parent_ref;
         end

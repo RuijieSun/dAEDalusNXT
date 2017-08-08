@@ -578,6 +578,7 @@ classdef class_beam_collection
                    obj.beam(i).write_structure_tecplot(fileID,i);
                end
            end
+          fclose(fileID);
        end
         
        function obj=write_fuel_tecplot(obj,filename)
@@ -1060,6 +1061,18 @@ classdef class_beam_collection
             end
         end
         
+        function obj = f_calc_stresses(obj, weights, varargin)
+            mem=obj.settings.nonlinear;
+            obj.settings.nonlinear=0;
+            obj=obj.f_solve();
+            obj.settings.nonlinear=mem;
+            for i=1:1:length(obj.beam)
+                if obj.beam(i).isExternalFEM==0
+                    obj.beam(i)=obj.beam(i).f_calc_stresses(1);
+                end
+            end
+        end
+        
         function obj=f_load_based_self_design(obj,weights,varargin)
             
             if nargin==3
@@ -1182,6 +1195,9 @@ classdef class_beam_collection
                         obj.m_total=obj.m_total+obj.beam(i).m_total;
                     elseif obj.beam(i).isExternalFEM==1
                         obj.m_total = obj.m_total + obj.beam(i).f_compute_totalMass;
+                        fuselageweights.FuselageSystemsEstimate=[];
+                        fuselageweights.FuselageNonStructuralEstimate=[];
+                        fuselageweights.NumberPAX=[];
                     end   
                 elseif isa(obj.beam(i),'class_pylon') && ~obj.beam(i).is_rigid
                     % fuselageweights.FuselageSystemsEstimate=weights.FuselageSystemsEstimate(i-k);
@@ -1340,10 +1356,10 @@ classdef class_beam_collection
                     obj=obj.f_solve_free_modes(1,0);
                     shape=obj.modefrequencies*0;
                     %Mdiag=obj.modeshapes'*obj.Mff*obj.modeshapes;
-                    Kdiag=obj.modeshapes'*obj.Kff*obj.modeshapes;
-                    Qdiag=obj.modeshapes'*obj.Ftest;
+                    Kdiag=obj.modeshapes(:,1:100)'*obj.Kff*obj.modeshapes(:,1:100);
+                    Qdiag=obj.modeshapes(:,1:100)'*obj.Ftest;
                     x_now=Kdiag(7:end,7:end)^-1*Qdiag(7:end);
-                    for ss=1:length(obj.modefrequencies)-6
+                    for ss=1:100-6
                         shape=shape+obj.modeshapes(:,6+ss)*x_now(ss);
                     end
                     obj.nodal_deflections=shape;
@@ -1676,6 +1692,32 @@ classdef class_beam_collection
             %                     q=i;break;
             %                 end
             %             end
+        end
+        
+        function obj=write_mode_animation_in_paraview(obj,Modes,exagFactor,folder,frames,varargin)
+            objBack=obj;
+            if ~isempty(varargin)
+                shape=varargin{1};
+            else
+                shape=obj.modeshapes(:,1)*0;
+            end
+            inputExagFactor=exagFactor;
+            exagFactor=ones(1,max(Modes));
+            if length(inputExagFactor)==length(Modes)
+                exagFactor(Modes)=inputExagFactor;
+            end
+            if length(inputExagFactor)==1
+                exagFactor=ones(1,max(Modes))*inputExagFactor;
+            end
+            mkdir(folder);
+            for i=Modes
+                for j=1:frames
+                    obj.nodal_deflections=shape+cos((j/frames)*2*pi)*exagFactor(i)*obj.modeshapes(:,i);
+                    obj=obj.f_postprocess();
+                    obj.write_structure_tecplot([folder, '\modeshape_str_', sprintf('%.3i',i),'_frame_', int2str(j)]);
+                end
+            end
+            obj=objBack;
         end
     end
 end

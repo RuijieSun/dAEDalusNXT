@@ -19,6 +19,8 @@ classdef class_aircraft
         %> wing object(s)
         wings;
         wings_structural_properties;
+        %> additional settings
+        addSettings;
         
         nacelles;
         pylons;
@@ -78,6 +80,148 @@ classdef class_aircraft
         control;
         acc;
         boundary_conditions;
+        %> clamping conditions (restraining) from xml
+        clamping_conditions;        
+        %{nGustZones x 1} cell array with panelIds belonging to GustZones
+        gustZones;
+    end
+    
+    methods (Static)
+        
+        function obj = create_from_cpacs(filename)
+            obj = class_aircraft();
+            %% check if tixi is installed
+            if or(~exist('tixiOpenDocument'), ~exist('tigl_matlab'))
+                if ~exist('tixiOpenDocument')
+                    disp('Tixi v2.2.4 is required. https://github.com/DLR-SC/tixi/releases/download/v2.2.4/TIXI-2.2.4-win64.exe')
+                end
+                if ~exist('tigl_matlab')
+                    disp('Tigl v2.2.0 is required. https://github.com/DLR-SC/tigl/releases/download/v2.2.0/TIGL-2.2.0-win64.exe')
+                end
+                return
+            end
+            tixi = tixiOpenDocument(filename);
+     
+            x_ac = '/cpacs/vehicles/aircraft';
+            if tixiGetNamedChildrenCount(tixi, '/cpacs/vehicles', 'aircraft') > 1
+                x_ac = [a_ac, '[1]'];
+            end
+
+            x_mod = [x_ac, '/model'];
+            if tixiGetNamedChildrenCount(tixi, x_ac, 'model') > 1
+                x_mod = [x_mod, '[1]'];
+            end
+
+            try
+                obj.name = tixiGetTextElement(tixi, [x_mod, '/name']);
+            catch
+                obj.name = 'unspeficied';
+            end
+
+            ac_uID = tixiGetTextAttribute(tixi, x_mod, 'uID');
+            tigl = tiglOpenCPACSConfiguration(tixi, ac_uID);
+            
+            x_ref = [x_mod, '/reference'];
+            obj.reference.S_ref = tixiGetDoubleElement(tixi, [x_ref, '/area']);
+            obj.reference.c_ref = tixiGetDoubleElement(tixi, [x_ref, '/length']);
+            
+            [x,y,z] = tixiGetPoint(tixi, [x_ref, '/point']);
+            obj.reference.p_ref = [x,y,z];
+
+            n_wings = tiglGetWingCount(tigl);
+            if n_wings == 1
+                [wing, b_ref] = ...
+                    class_aerosurface.create_from_cpacs(tixi, tigl, 1);
+                obj.wings = wing;
+                obj.wings_structural_properties = obj.wings.wings_structural_properties;
+                
+                obj.reference.b_ref = b_ref;
+            else
+                for i = n_wings:-1:1
+                    [wing, b_ref] = ...
+                        class_aerosurface.create_from_cpacs(tixi, tigl, i);
+                    wings_structural_properties(i) = wing.wings_structural_properties;
+                    wings(i) = wing;
+                    
+                    if i == 1
+                        obj.reference.b_ref = b_ref;
+                    end
+                end
+                
+                obj.wings = wings;
+                obj.wings_structural_properties = wings_structural_properties;
+            end
+            
+            obj.weights = class_weights;
+            obj.weights.WingSystemsEstimate = [];
+            obj.weights.WingSkinEstimate = [];
+            obj.weights.FuselageNonStructuralEstimate = [];
+            obj.weights.FuselageSystemsEstimate = [];
+            obj.weights.WingInitialGuess = [];
+            
+            if tixiGetNamedChildrenCount(tixi, x_mod, 'analyses')
+                if tixiGetNamedChildrenCount(tixi, [x_mod, '/analyses'], 'massBreakdown')
+                    x_mbd = [x_mod, '/analyses/massBreakdown'];
+                    x_desMass = [x_mbd, '/designMasses'];
+                    
+                    obj.weights.MTOW = tixiGetDoubleElement(tixi, [x_desMass, '/mTOM/mass']);
+                    obj.weights.MZFW = tixiGetDoubleElement(tixi, [x_desMass, '/mZFM/mass']);
+                    obj.weights.MLW = tixiGetDoubleElement(tixi, [x_desMass, '/mMLM/mass']);
+                    obj.weights.OWE = tixiGetDoubleElement(tixi, [x_mbd, '/mOEM/massDescription/mass']);
+                    
+                    f_oew_systs = 0.3;
+                    f_wingbox_skin = 0.3;
+                    f_wingstruct_skin = 0.2;
+                    
+                    if tixiGetNamedChildrenCount(tixi, [x_mbd, '/mOEM'], 'mEM')
+                        if tixiGetNamedChildrenCount(tixi, [x_mbd, '/mOEM/mEM'], 'mSystems')
+                            W_systs = tixiGetDoubleElement(tixi, [x_mbd, '/mOEM/mEM/mSystems/massDescription/mass']);
+                        else
+                            W_systs = f_oew_systs*obj.weights.OWE;
+                        end
+                        
+                        if tixiGetNamedChildrenCount(tixi, [x_mbd, '/mOEM/mEM'], 'mStructure')
+                            W_struct = tixiGetDoubleElement(tixi, [x_mbd, '/mOEM/mEM/mStructure/massDescription/mass']);
+                            
+                            if tixiGetNamedChildrenCount(tixi, [x_mbd, '/mOEM/mEM/mStructure'], 'mWingsStructure')
+                                n_mWingStructure = tixiGetNamedChildrenCount(tixi, [x_mbd, '/mOEM/mEM/mStructure/mWingsStructure'], 'mWingStructure');
+                                if n_mWingStructure ~= n_wings
+                                    error('Number of mWingStructures does not match number of wings!');             
+                                else
+                                    for i = 1:n_mWingStructure
+                                        x_mWingStructure = sprintf('%s/mOEM/mEM/mStructure/mWingsStructure/mWingStructure[%i]', x_mbd, i);
+                                        W_wingstruct = tixiGetDoubleElement(tixi, [x_mWingStructure, '/massDescription/mass']);
+                                        
+                                        WingSkinEstimate = 0;
+                                        n_mComponentSegment = tixiGetNamedChildrenCount(tixi, x_mWingStructure, 'mComponentSegment');
+                                        for j = 1:n_mComponentSegment
+                                            x_mComponentSegment = sprintf('%s/mComponentSegment[%i]', x_mWingStructure, j);
+                                            if tixiGetNamedChildrenCount(tixi, x_mComponentSegment, 'mWingBox')
+                                                if tixiGetNamedChildrenCount(tixi, [x_mComponentSegment, '/mWingBox'], 'mSkins')
+                                                    WingSkinEstimate = WingSkinEstimate + tixiGetDoubleElement(tixi, [x_mComponentSegment, '/mWingBox/mSkins/massDescription/mass']);
+                                                else
+                                                    WingSkinEstimate = WingSkinEstimate + f_wingbox_skin*tixiGetDoubleElement(tixi, [x_mComponentSegment, '/mWingBox/massDescription/mass']);
+                                                end
+                                            else
+                                                WingSkinEstimate = WingSkinEstimate + f_wingstruct_skin*tixiGetDoubleElement(tixi, [x_mComponentSegment, '/massDescription/mass']);
+                                            end
+                                        end
+                                        
+                                        obj.weights.WingSkinEstimate(i) = WingSkinEstimate;
+                                        obj.weights.WingInitialGuess(i) = tixiGetDoubleElement(tixi, [x_mWingStructure, '/massDescription/mass']);
+                                        obj.weights.WingSystemsEstimate(i) = W_systs*W_wingstruct/W_struct;
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+                      
+            obj.grid_settings=class_grid_settings;    
+            mkdir('results', obj.name);
+        end
+        
     end
     
     methods
@@ -85,17 +229,23 @@ classdef class_aircraft
         obj=read_xml_definition(obj,filename);
         
         function obj = class_aircraft(wing,varargin)
-            if nargin==1
+            if nargin == 0
+                % pass
+            elseif nargin==1
                 obj.CD_f=0;
                 aero_surface(1)=wing;
                 obj.wings=aero_surface;
                 obj.name='blank';
             else
                 obj=read_xml_definition(obj,wing);
+                obj.runInputChecks();
             end
-            obj.grid_settings=class_grid_settings;
             
-           mkdir('results',obj.name);
+            if nargin ~= 0
+                obj.grid_settings=class_grid_settings;
+            
+                mkdir('results',obj.name);
+            end
         end
         
         function obj = add_aerosurface(obj,aero_surface)
@@ -173,8 +323,12 @@ classdef class_aircraft
         end
 
         function obj=compute_beam_forces(obj,F_body, M_body ,aircraft_structure,varargin)
-            if nargin==5;
+            if nargin==5
                 nw=varargin{1};
+            elseif nargin==3
+                aircraft_structure=M_body;
+                M_body=F_body*0;
+                nw=length(obj.wings);
             else
                 nw=length(obj.wings);
             end
@@ -212,8 +366,14 @@ classdef class_aircraft
         
         function obj=compute_wingbox_coords(obj)
             if ~isempty(obj.wings_structural_properties)
-                for i=1:length(obj.wings)
-                    obj.wings(i)=obj.wings(i).compute_wingbox_coords(obj.grid_settings.dy_max_struct_grid,obj.wings_structural_properties(i).frontspar,obj.wings_structural_properties(i).rearspar);
+                if isfield(obj.wings_structural_properties, 'fs_segments')
+                    for i = 1:length(obj.wings)
+                        obj.wings(i) = obj.wings(i).compute_wingbox_coords(obj.grid_settings.dy_max_struct_grid, true);
+                    end
+                else                
+                    for i=1:length(obj.wings)
+                        obj.wings(i)=obj.wings(i).compute_wingbox_coords(obj.grid_settings.dy_max_struct_grid,obj.wings_structural_properties(i).frontspar,obj.wings_structural_properties(i).rearspar);
+                    end
                 end
             else
                 for i=1:length(obj.wings)
@@ -259,7 +419,8 @@ classdef class_aircraft
             
             obj.acc=[ax ay az ap aq ar]; 
         end
-
+        
+        
         function obj=compute_grid(obj)
             % read desired grid size from grid_settings structure
             x_max=obj.grid_settings.x_max_grid_size;
@@ -326,6 +487,7 @@ classdef class_aircraft
             if obj.grid_settings.aerodynamic_fuselage==1
                 obj=compute_fuselage_grid(obj);
             end
+            obj.gustZones={1:size(obj.panels,2)};
         end    
         
                 
@@ -655,8 +817,9 @@ classdef class_aircraft
                             obj.wings(i).wing_segments(j).te_device.delta(2)=deflection;
                             obj.wings(i).wing_segments(j)=obj.wings(i).wing_segments(j).f_deflect_control_surface(obj.wings(i).wing_segments(j).te_device.name,-deflection,'left');
                         end
+                    end
                         
-                    elseif ~isempty(obj.wings(i).wing_segments(j).le_device)
+                    if ~isempty(obj.wings(i).wing_segments(j).le_device)
                         if strcmp(obj.wings(i).wing_segments(j).le_device.name,name)
                             obj.wings(i).wing_segments(j)=obj.wings(i).wing_segments(j).f_deflect_control_surface(name,deflection);
                         end
@@ -826,6 +989,28 @@ classdef class_aircraft
                             obj.controlSurfaceMoments(iCs)=hingeMoment;
                             
                         end
+                    end
+                end
+            end
+        end
+        function [pass]= runInputChecks(obj)
+            % check if segmentboundaries are smooth (twist and profile)
+            pass=1;
+            for iWing=1:length(obj.wings)
+                for iSeg=2:length(obj.wings(iWing).wing_segments)
+                    if ~isequal(obj.wings(iWing).wing_segments(iSeg-1).Theta_t,obj.wings(iWing).wing_segments(iSeg).Theta_r)
+                        fprintf('Warning: nonsmooth twist transition between segment %i and segment %i on wing %i \n',iSeg-1,iSeg, iWing)
+                        pass=0;
+                    end
+                    if ~isequal(obj.wings(iWing).wing_segments(iSeg-1).profile_name_t,obj.wings(iWing).wing_segments(iSeg).profile_name_r)
+                        if ~isequal(round(obj.wings(iWing).wing_segments(iSeg-1).profile_t,10),round(obj.wings(iWing).wing_segments(iSeg).profile_r,10))
+                            fprintf('Warning: nonsmooth profile transition between segment %i and segment %i on wing %i \n',iSeg-1,iSeg, iWing)
+                            pass=0;
+                        end
+                    end
+                    if  ~isequal(round(obj.wings(iWing).wing_segments(iSeg-1).c_t,10),round(obj.wings(iWing).wing_segments(iSeg).c_r,10))
+                        fprintf('Warning: nonsmooth chord transition between segment %i and segment %i on wing %i \n',iSeg-1,iSeg, iWing)
+                        pass=0;
                     end
                 end
             end

@@ -155,6 +155,14 @@ if strcmp(xmlstruct.child(1).tag,'DAEDALUS')
                     end
                     obj.boundary_conditions{j}=connection;
                 end
+                
+                if strcmp(xml_aircraft.child(i).child(j).tag,'RESTRAINING')
+                   restraining{1}=xml_aircraft.child(i).child(j).child(1).attribs.value;
+                   restraining{2}=str2double(xml_aircraft.child(i).child(j).child(1).child(1).value);
+                   restraining{3}=str2double(xml_aircraft.child(i).child(j).child(1).child(2).value);
+                   restraining{4}=str2double(xml_aircraft.child(i).child(j).child(1).child(3).value);
+                   obj.clamping_conditions=restraining;
+                end
             end
         end
         
@@ -162,7 +170,24 @@ if strcmp(xmlstruct.child(1).tag,'DAEDALUS')
             obj.reference=class_reference(str2double(xml_aircraft.child(i).child(1).value),str2double(xml_aircraft.child(i).child(2).value),str2double(xml_aircraft.child(i).child(3).value),...
                 [str2double(xml_aircraft.child(i).child(4).child(1).value),str2double(xml_aircraft.child(i).child(4).child(2).value),str2double(xml_aircraft.child(i).child(4).child(3).value)]);
         end
-        
+        if strcmp(xml_aircraft.child(i).tag,'SPECIALSETTINGS')
+            specialSettings=[];
+            for j=1:length(xml_aircraft.child(i).child)
+                switch xml_aircraft.child(i).child(j).tag
+                    case 'WINGBOX_FUELING_FACTOR'
+                        specialSettings.wingboxFuelingFactor=str2num(xml_aircraft.child(i).child(j).value);
+                    case 'WING_T_MIN_SK'
+                        specialSettings.wingTminSK=str2num(xml_aircraft.child(i).child(j).value);
+                    case 'WING_T_MIN_SP'
+                        specialSettings.wingTminSP=str2num(xml_aircraft.child(i).child(j).value);
+                    case 'FUS_T_MIN_SK'
+                        specialSettings.fusTminSK=str2num(xml_aircraft.child(i).child(j).value);
+                    case 'FUS_T_MIN_SP'
+                        specialSettings.fusTminSP=str2num(xml_aircraft.child(i).child(j).value);
+                end
+                obj.addSettings=specialSettings;
+            end
+        end
 
         
         %                   if strcmp(xml_aircraft.child(i).tag,'PROFILES')
@@ -174,8 +199,9 @@ if strcmp(xmlstruct.child(1).tag,'DAEDALUS')
     end
 else
     
-    fprintf('Unknown Data Format');
+    fprintf('Unknown Data Format: %s \n', xmlstruct.child(1).tag);
 end
+
 obj.wings_structural_properties=wings_structural_properties;
 k=1;
 for i=1:length(obj.wings)

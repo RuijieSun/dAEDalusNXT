@@ -17,7 +17,6 @@ classdef class_grid_settings
         aerodynamic_fuselage=0;
         wake=0;
         
-        
     end
     
     methods

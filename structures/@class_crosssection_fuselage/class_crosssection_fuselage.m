@@ -26,15 +26,15 @@
 %> contains all GEOMETRICAL and STRUCTURAL information for a finite fuselage crosssection
 % ======================================================================
 
-classdef class_crosssection_fuselage
+classdef class_crosssection_fuselage < class_crosssection
     
     
     properties
 
         %> fuselage radius                                      [m]
-        r;
+        r = 0;
         %> wetted crosssection in fuselage segment              [m2]
-        A_fuel;
+        A_fuel = 0;
         
         %% environmental factors     
         
@@ -90,9 +90,14 @@ classdef class_crosssection_fuselage
         %>
         %> @return instance of the class_crosssection_fuselage
         % =================================================================
-         function obj = class_crosssection_fuselage()
-                obj.r=0;
-                obj.A_fuel=0;  
+         function obj = class_crosssection_fuselage(r, A_fuel)
+             if nargin >= 1
+                obj.r = r;
+             end
+             
+             if nargin == 2
+                obj.A_fuel = A_fuel;
+             end
          end
         % =================================================================
         %> @brief set geometry
@@ -140,6 +145,10 @@ classdef class_crosssection_fuselage
         % =================================================================
         function dm=f_calc_dm(obj)
             dm=2*pi*obj.r*(obj.t_sk_eq*obj.rho_sk_eq+obj.t_fr_eq*obj.rho_fr_eq);
+        end
+        
+        function obj = f_calc_stresses(obj, Mbx, Mby, Mt, Qx, Qz, loadcase_idx, overwrite)
+           obj = obj; 
         end
         
         % =================================================================

@@ -12,8 +12,39 @@ for nwings=1:length(aircraft.wings_structural_properties)
     %TODO: different material for each segment
     material=class_material(aircraft.wings_structural_properties(nwings).material(1));
     wing_settings=wing_settings.f_set_material(material);
+    %modify minThicknesses if specified in XML
+    if isfield(aircraft.addSettings, 'wingTminSK')
+        wing_settings.t_min_sk=aircraft.addSettings.wingTminSK;
+    end
+    if isfield(aircraft.addSettings, 'wingTminSP')
+        wing_settings.t_min_sp=aircraft.addSettings.wingTminSP;
+    end
     aircraft=aircraft.compute_wingbox_coords();
-    wingstructure=class_wing((size(aircraft.wings(nwings).wingbox_coords,2)-1)*(aircraft.wings(nwings).symmetric+1),'class_crosssection_wingbox',aircraft.wings(nwings).name);
+    
+    n_elems = (size(aircraft.wings(nwings).wingbox_coords,2)-1)*(aircraft.wings(nwings).symmetric+1);
+    wingbox_crosssections = repmat([class_crosssection_wingbox()], 1, n_elems);
+    if isfield(aircraft.wings(nwings).wing_segments(1).structural_properties, 'fs_segments')
+        c_elems = 1;
+        for k = 1:(1 + aircraft.wings(nwings).symmetric)
+            for i = 1:length(aircraft.wings(nwings).wing_segments)
+                wing_segment = aircraft.wings(nwings).wing_segments(i);
+                for j = 1:length(wing_segment.structural_properties.t_fs)-1
+                    wingbox_crosssections(c_elems).t_sp_fr = wing_segment.structural_properties.t_fs(j);
+                    wingbox_crosssections(c_elems).t_sp_re = wing_segment.structural_properties.t_rs(j);
+                    wingbox_crosssections(c_elems).t_sk_up = wing_segment.structural_properties.t_ts(j);
+                    wingbox_crosssections(c_elems).t_sk_lo = wing_segment.structural_properties.t_bs(j);
+                    wingbox_crosssections(c_elems).segment_index = i;
+                    c_elems = c_elems + 1;
+                end
+            end
+        end
+    end
+    
+    wingstructure=class_wing(n_elems, wingbox_crosssections, aircraft.wings(nwings).name);
+    %modify fuelingfactor if specified in XML
+    if isfield(aircraft.addSettings, 'wingboxFuelingFactor')
+        wingstructure=wingstructure.f_set_fuelingFactor(aircraft.addSettings.wingboxFuelingFactor);
+    end
     wingstructure=wingstructure.f_init_structure(aircraft.wings(nwings),aircraft.wings_structural_properties(nwings).is_fueled);
     if wingstructure.isExternalFEM==0
         wingstructure=wingstructure.f_init_material_properties(wing_settings);
@@ -59,7 +90,11 @@ for nfuse=1:length(aircraft.fuselages)
     fuselage_settings=fuselage_settings.f_set_material(class_material('aluminum'));
     aircraft=aircraft.compute_shell_coords();
     aircraft.fuselages(nfuse)=aircraft.fuselages(nfuse).compute_shell_coords(aircraft.grid_settings.y_max_grid_size);
-    fuselage_structure=class_fuselage(size(aircraft.fuselages(nfuse).center_coords,2)-1,'class_crosssection_fuselage',aircraft.fuselages(nfuse).name);
+    
+    n_elems = size(aircraft.fuselages(nfuse).center_coords,2)-1;
+    fuselage_crosssections = repmat([class_crosssection_fuselage()], 1, n_elems);
+    
+    fuselage_structure=class_fuselage(n_elems, fuselage_crosssections, aircraft.fuselages(nfuse).name);
     
     fuselage_structure=fuselage_structure.f_init_structure(aircraft.fuselages(nfuse));
     for i=1:size(fuselage_structure.beamelement,2)
@@ -93,11 +128,9 @@ for nfuse=1:length(aircraft.fuselages)
     end
     
    % fuselage_structure=fuselage_structure.f_add_boundary_condition(class_boundary_condition(1,[1 1 1 1 1 1],[0 0 0 0 0 0]));
-   %TODO use xml specified constrainment instead of the following line in which the fuselage is constrained close to the leading edge of the main wing (wing(1))
-   
-%    fuselage_structure=fuselage_structure.f_add_boundary_condition(class_boundary_condition(ceil((abs(aircraft.fuselages(1).fuselage_segments(1,1).pos(1,1))+aircraft.wings(1,1).wing_segments(1,1).pos(1,1))/aircraft.grid_settings.dy_max_struct_grid),[1 1 1 1 1 1],[0 0 0 0 0 0]));
-   wingRootCoordX = aircraft_structure.beam(1).node_coords(ceil(aircraft_structure.beam(1).nel/2)+1,1);
-   distanceToWing = fuselage_structure.node_coords(:,1)-wingRootCoordX;
+   % fuselage_structure=fuselage_structure.f_add_boundary_condition(class_boundary_condition(ceil((abs(aircraft.fuselages(1).fuselage_segments(1,1).pos(1,1))+aircraft.wings(1,1).wing_segments(1,1).pos(1,1))/aircraft.grid_settings.dy_max_struct_grid),[1 1 1 1 1 1],[0 0 0 0 0 0]));
+   desiredClampingPoint = [aircraft.clamping_conditions{2},aircraft.clamping_conditions{3},aircraft.clamping_conditions{4}]';
+   distanceToWing = fuselage_structure.node_coords(:,1)-desiredClampingPoint(1);
    [~,boundaryIdx] = min(abs(distanceToWing));
    fuselage_structure = fuselage_structure.f_add_boundary_condition(class_boundary_condition(boundaryIdx,[1 1 1 1 1 1],[0 0 0 0 0 0]));
 
@@ -119,8 +152,8 @@ for ne=1:length(aircraft.engines)
             pylon=class_pylon(2,'none',['Engine' num2str(ne) 'Pylon' ]);
             geof.center_coords=pyl_coords;
             pylon=pylon.f_init_structure(geof);
-            pylon.beamelement(1).el_m_sys=0.001;
-            pylon.beamelement(2).el_m_sys=aircraft.engines(ne).m-0.001;
+            pylon.beamelement(1).el_m_sys=pylon.beamelement(1).m*pylon.beamelement(1).le;
+            pylon.beamelement(2).el_m_sys=aircraft.engines(ne).m-pylon.beamelement(1).m;
             connection{1}=aircraft.engines(ne).mounting;
             connection{2}=['Engine' num2str(ne) 'Pylon' ];
             aircraft_structure=aircraft_structure.f_add_beam(pylon);
@@ -139,8 +172,8 @@ for ne=1:length(aircraft.engines)
             pylon=class_pylon(2,'none',['Engine' num2str(ne) 'Pylon' ]);
             geof.center_coords=pyl_coords;
             pylon=pylon.f_init_structure(geof);
-            pylon.beamelement(1).el_m_sys=0.001;
-            pylon.beamelement(2).el_m_sys=aircraft.engines(ne).m-0.001;
+            pylon.beamelement(1).el_m_sys=pylon.beamelement(1).m*pylon.beamelement(1).le;
+            pylon.beamelement(2).el_m_sys=aircraft.engines(ne).m-pylon.beamelement(1).m;
             connection{1}=aircraft.engines(ne).mounting;
             connection{2}=['Engine' num2str(ne) 'Pylon' ];
             aircraft_structure=aircraft_structure.f_add_beam(pylon);

@@ -15,6 +15,14 @@ classdef class_UVLM_computation_settings
         spp;
         % waklength in multiples of b_ref
         wakelength_factor;
+        % wakegrowth factor for ssm grids
+        wakeGrowthFactor=1;
+        % number of fixed panels for ssm grids
+        nFixedWakePanels
+        % wake panel dens for ssm grids
+        wakePanelDensity
+        %additional wake length factor for last panel
+        addLengthFactorLastPanel
         % number of harmonic oscillations
         n_osc;
         

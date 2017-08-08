@@ -37,6 +37,7 @@ for i=1:size(fuselage_geo.center_coords,2)-1
         
     le=sqrt(elem_vec(1)*elem_vec(1)+elem_vec(2)*elem_vec(2)+elem_vec(3)*elem_vec(3));
     phi=-asin(elem_vec(1)/le);
+    phi=-pi/2; %<- TODO: validate this ... all fuselages in x dir?
     nu=0;
     sweep=fuselage_geo.fuselage_segments(seg_id(i)).sweep*pi/180;
 
@@ -49,6 +50,7 @@ for i=1:size(fuselage_geo.center_coords,2)-1
 
     %.setElementGeometry(le,phi,nu,twist);
     fuselage_struct.Vfuselage=fuselage_struct.Vfuselage+pi*r^2*le;
+	fuselage_struct.beamelement(i).f_calcCrossProp();
 end
         epsilon(i+1)=sweep;
         nnu(i+1)=0;

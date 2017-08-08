@@ -19,6 +19,14 @@ classdef class_UVLM_SSM
         %speed for linearized model
         Vlin
         
+        %matrix which transforms vector of panel velocities and their
+        %derivatives to b,bDot and Vs, stored as sys
+        vpT
+        
+        %matrix which transforms gust inputs and their
+        %derivatives to b,bDot and Vs, stored as sys
+        vgT
+        
         %matrix which transforms vector of rigid body motion and their
         %derivatives to b,bDot and Vs, stored as sys
         rbmT
@@ -46,7 +54,9 @@ classdef class_UVLM_SSM
     methods
         function obj=class_UVLM_SSM(solver)
             obj.settings=class_UVLM_SSM_settings();
-            obj.rbmT=obj.generateRigidBodyMotionInputTransormation(solver);
+            obj.rbmT=obj.generateRigidBodyMotionInputTransformation(solver);
+            obj.vpT=obj.generatePanelVelocityInputTransformation(solver);
+            obj.vgT=obj.generateGustInputTransformation(solver);
             obj.LPVKernel=class_UVLM_LPVKernel(solver);
             if obj.settings.redOrder~=0
                 obj.LPVKernel=obj.LPVKernel.reduce(obj.settings.redOrder, obj.settings.redMethod);
@@ -64,22 +74,44 @@ classdef class_UVLM_SSM
             obj.LPVKernel=obj.LPVKernel.linearize(norm(obj.Vlin));
             obj=obj.generateLinearOutputTransformation(solver, obj.Vlin);
             obj=obj.generateDerivativeOutputTransformation(solver, obj.Vlin);
-            obj=obj.generateSectionalPressureOutputTransformation(solver, obj.Vlin);
-            obj.csT=obj.generateCsInputTransormation(solver,obj.Vlin);
-            % connect in a way that all outputs and inputs are preserved
-            inputSys=parallel(obj.rbmT,obj.csT,'name');
+            if obj.settings.sectPress
+                obj=obj.generateSectionalPressureOutputTransformation(solver, obj.Vlin);
+            end
+            obj.csT=obj.generateCsInputTransformation(solver,obj.Vlin);
+            % parallel connection of various inputTransformations
+            if ~isempty(obj.csT)
+                inputSys=parallel(obj.rbmT,obj.csT,'name');
+            else
+                inputSys=obj.rbmT;
+            end
+            %add panel velocities as inputs
+            inputSys=parallel(inputSys,obj.vpT,'name');
+            %add gust Zone velocities as inputs
+            inputSys=parallel(inputSys,obj.vgT,'name');
+            bT=ss(eye(2*nB));
+            bT.inputName=obj.LPVKernel.linSSM.InputName([obj.LPVKernel.linSSM.InputGroup.b obj.LPVKernel.linSSM.InputGroup.bDot]);
+            bT.InputGroup.b=1:nB;
+            bT.InputGroup.bDot=nB+1:2*nB;
+            bT.OutputGroup=bT.InputGroup;
+            bT.OutputName=bT.InputName;
+            %add normal velocities as inputs
+            inputSys=parallel(inputSys,bT,'name');
+            
             %prepare output matrix (from f to out)
             if obj.settings.sectPress
                 allOutputs=[obj.totDerOutT; obj.sectPressOutT];
             else
                 allOutputs=[obj.totDerOutT;];
             end
-            %prepare from kernelOut to out
+            %prepare outputsys(from kernelOut to out)
             if obj.settings.splitForce
                 outputSys=series(obj.linOutT,allOutputs,[obj.linOutT.OutputGroup.Fp, obj.linOutT.OutputGroup.Fp_st, obj.linOutT.OutputGroup.Fp_ust],[allOutputs.InputGroup.Fp allOutputs.InputGroup.Fp_st allOutputs.InputGroup.Fp_ust]);
+                
             else
                 outputSys=series(obj.linOutT,allOutputs,obj.linOutT.OutputGroup.Fp,obj.totDerOutT.InputGroup.Fp);
             end
+            %add obj.linOutT to have forces as outputs
+            outputSys=parallel(outputSys,obj.linOutT,'name');
             
             %connect input, kernel, output
              obj.linSSM=series(...
@@ -96,6 +128,13 @@ classdef class_UVLM_SSM
             %stored as sys
             %number bound panels
             nB=size(solver.panels,2);
+            %Mach Correction Factor
+            if solver.Ma_corr<1
+                betaInf=solver.Ma_corr;
+                betaInf=1; %<- comment: if the grid is stretched, no further postprocessing is needed for the forces (at least do the values then match the ones from compressible Nastran solutions (steady))
+            else
+                betaInf=1;
+            end
             
             Areas=solver.area';
             rho=solver.state.rho_air;
@@ -110,9 +149,9 @@ classdef class_UVLM_SSM
             %matrix to repeat gamma vector elements 3 times
             gbrep=kron(eye(nB),[1 1 1]');
             %factor for gbdotf
-            gbdotF=gbrep*Areas.*NzeroHat*rho;
+            gbdotF=gbrep*Areas.*NzeroHat*rho*1/betaInf;
             %factor for gbf
-            gbF=Scross*Ihat*V'*rho;
+            gbF=Scross*Ihat*V'*rho*1/betaInf;
             %overall transformation matrix
             if obj.settings.splitForce
                 obj.linOutT=ss([diag(gbF)*gbrep -diag(gbdotF)*gbrep;...
@@ -154,28 +193,61 @@ classdef class_UVLM_SSM
             %reference point to the panel fvap
             rSPCellSkew=skewsymmatrixCell(num2cell(solver.r',2)); 
             Rxs=[rSPCellSkew{:}]';
-            T=[Ihat';Rxs';solver.Rcs]/(solver.state.rho_air/2*norm(V)^2*solver.reference.S_ref);
+            T=[Ihat';Rxs';solver.Rcss];
+            Td=T/(solver.state.rho_air/2*norm(V)^2*solver.reference.S_ref);
             if obj.settings.splitForce
-                obj.totDerOutT=ss(blkdiag(T,T,T));
+                obj.totDerOutT=ss([blkdiag(Td,Td,Td);blkdiag(T,T,T)]);
                 obj.totDerOutT.InputName=[    cellstr([repmat(['Fp_x_'; 'Fp_y_';'Fp_z_'],nB,1) num2str(reshape(repmat(1:nB,3,1),3*nB,1),'%04d')]);...
                                                     cellstr([repmat(['Fp_st_x_'; 'Fp_st_y_';'Fp_st_z_'],nB,1) num2str(reshape(repmat(1:nB,3,1),3*nB,1),'%04d')]);...
                                                     cellstr([repmat(['Fp_ust_x_'; 'Fp_ust_y_';'Fp_ust_z_'],nB,1) num2str(reshape(repmat(1:nB,3,1),3*nB,1),'%04d')]);];
                 nCs=size(solver.Rcs,1);
-                obj.totDerOutT.OutputName=['CX'; 'CY'; 'CZ'; 'CL'; 'CM'; 'CN'; cellstr([repmat('Chinge_',nCs,1) num2str([1:nCs]','%04d')]);...
-                                        'CX_st'; 'CY_st'; 'CZ_st'; 'CL_st'; 'CM_st'; 'CN_st'; cellstr([repmat('Chinge_st_',nCs,1) num2str([1:nCs]','%04d')]);...
-                                        'CX_ust'; 'CY_ust'; 'CZ_ust'; 'CL_ust'; 'CM_ust'; 'CN_ust'; cellstr([repmat('Chinge_ust_',nCs,1) num2str([1:nCs]','%04d')]);];
+                if nCs > 0
+                    obj.totDerOutT.OutputName=['CX'; 'CY'; 'CZ'; 'CL'; 'CM'; 'CN'; cellstr([repmat('Chinge_',nCs,1) num2str([1:nCs]','%04d')]);...
+                                            'CX_st'; 'CY_st'; 'CZ_st'; 'CL_st'; 'CM_st'; 'CN_st'; cellstr([repmat('Chinge_st_',nCs,1) num2str([1:nCs]','%04d')]);...
+                                            'CX_ust'; 'CY_ust'; 'CZ_ust'; 'CL_ust'; 'CM_ust'; 'CN_ust'; cellstr([repmat('Chinge_ust_',nCs,1) num2str([1:nCs]','%04d')]);
+                                            'X'; 'Y'; 'Z'; 'L'; 'M'; 'N'; cellstr([repmat('Mhinge_',nCs,1) num2str([1:nCs]','%04d')]);...
+                                            'X_st'; 'Y_st'; 'Z_st'; 'L_st'; 'M_st'; 'N_st'; cellstr([repmat('Mhinge_st_',nCs,1) num2str([1:nCs]','%04d')]);...
+                                            'X_ust'; 'Y_ust'; 'Z_ust'; 'L_ust'; 'M_ust'; 'N_ust'; cellstr([repmat('Mhinge_ust_',nCs,1) num2str([1:nCs]','%04d')]);];
+                else
+                    obj.totDerOutT.OutputName={ 'CX'; 'CY'; 'CZ'; 'CL'; 'CM'; 'CN'; ...
+                                                'CX_st'; 'CY_st'; 'CZ_st'; 'CL_st'; 'CM_st'; 'CN_st';...
+                                                'CX_ust'; 'CY_ust'; 'CZ_ust'; 'CL_ust'; 'CM_ust'; 'CN_ust';...
+                                                'X'; 'Y'; 'Z'; 'L'; 'M'; 'N'; ...
+                                                'X_st'; 'Y_st'; 'Z_st'; 'L_st'; 'M_st'; 'N_st';...
+                                                'X_ust'; 'Y_ust'; 'Z_ust'; 'L_ust'; 'M_ust'; 'N_ust';};
+                    
+                end
                 obj.totDerOutT.OutputGroup.Derivatives=[1:(6+nCs)];
                 obj.totDerOutT.OutputGroup.Derivatives_st=[(6+nCs)+1:2*(6+nCs)];
-                obj.totDerOutT.OutputGroup.Derivatives_ust=[2*(6+nCs)+1:3*(6+nCs)];
+                obj.totDerOutT.OutputGroup.Derivatives_ust=[2*(6+nCs)+1:3*(6+nCs)]; 
+                
+                obj.totDerOutT.OutputGroup.RBMForces=[(6+nCs)*3+1:(6+nCs)*3+3];
+                obj.totDerOutT.OutputGroup.RBMMoments=[(6+nCs)*3+4:(6+nCs)*3+6];
+                
+                obj.totDerOutT.OutputGroup.RBMForces_st=[(6+nCs)*4+1:(6+nCs)*4+3];
+                obj.totDerOutT.OutputGroup.RBMMoments_st=[(6+nCs)*4+4:(6+nCs)*4+6];
+                
+                obj.totDerOutT.OutputGroup.RBMForces_ust=[(6+nCs)*5+1:(6+nCs)*5+3];
+                obj.totDerOutT.OutputGroup.RBMMoments_ust=[(6+nCs)*5+4:(6+nCs)*5+6];
+                
                 obj.totDerOutT.InputGroup.Fp=[1:3*nB];
                 obj.totDerOutT.InputGroup.Fp_st=[3*nB+1:6*nB];
                 obj.totDerOutT.InputGroup.Fp_ust=[6*nB+1:9*nB];
+                if nCs > 0
+                    obj.totDerOutT.OutputGroup.HingeMoments=[(6+nCs)*3+6+1:(6+nCs)*3+6+nCs];
+                    obj.totDerOutT.OutputGroup.HingeMoments_st=[(6+nCs)*4+6+1:(6+nCs)*4+6+nCs];
+                    obj.totDerOutT.OutputGroup.HingeMoments_ust=[(6+nCs)*5+6+1:(6+nCs)*5+6+nCs];
+                end
             else
                 obj.totDerOutT=ss(T);
                 obj.totDerOutT.InputName=cellstr([repmat(['Fp_x_'; 'Fp_y_';'Fp_z_'],nB,1) num2str(reshape(repmat(1:nB,3,1),3*nB,1),'%04d')]);
                 nCs=size(solver.Rcs,1);
                 obj.totDerOutT.OutputName=['CX'; 'CY'; 'CZ'; 'CL'; 'CM'; 'CN'; cellstr([repmat('Chinge_',nCs,1) num2str([1:nCs]','%04d')])];
                 obj.totDerOutT.OutputGroup.Derivatives=[1:(6+nCs)];
+                
+                obj.totDerOutT.OutputGroup.RBMForces=[(6+nCs)+1:(6+nCs)+3];
+                obj.totDerOutT.OutputGroup.RBMMoments=[(6+nCs)+4:(6+nCs)+6];
+                obj.totDerOutT.OutputGroup.HingeMoments=[(6+nCs)+6+1:(6+nCs)+6+nCs];
                 obj.totDerOutT.InputGroup.Fp=[1:3*nB];
             end
         end
@@ -219,7 +291,7 @@ classdef class_UVLM_SSM
     end
     methods(Static) % static
      
-        function rbmT=generateRigidBodyMotionInputTransormation(solver)
+        function rbmT=generateRigidBodyMotionInputTransformation(solver)
             
             %number bound panels
             nB=size(solver.panels,2);            
@@ -268,7 +340,7 @@ classdef class_UVLM_SSM
                     zeros(nB,3);...
                 ]);
             
-            rbmT.InputName={'vB_x';'vB_y';'vB_z';'wB_x';'wB_y';'wB_z';'vBDot_x';'vBDot_y';'vBDot_z'; 'wBDot_x';'wBDot_y';'wBDot_z'};
+            rbmT.InputName={'vB_x';'vB_y';'vB_z';'vBDot_x';'vBDot_y';'vBDot_z';'wB_x';'wB_y';'wB_z'; 'wBDot_x';'wBDot_y';'wBDot_z'};
             
             rbmT.OutputName=[   cellstr([repmat('b_',nB,1) num2str([1:nB]','%04d')]);...
                                 cellstr([repmat('bDot_',nB,1) num2str([1:nB]','%04d')]);...
@@ -280,17 +352,46 @@ classdef class_UVLM_SSM
             rbmT.OutputGroup.vSInf_x=[nB*2+1:3*nB];
             rbmT.OutputGroup.vSInf_y=[nB*3+1:4*nB];
             rbmT.OutputGroup.vSInf_z=[nB*4+1:5*nB];
+            rbmT.InputGroup.vB=[1:3];
+            rbmT.InputGroup.vBDot=[4:6];
+            rbmT.InputGroup.wB=[7:9];
+            rbmT.InputGroup.wBDot=[10:12];
         end
-        function csT=generateCsInputTransormation(solver,Vlin)
-            %notiz für freitag:
-            % es fehlt der einfluss der
-            % csdeflection auf die vsinf velocity - weshalb der drag
-            % wahrscheinlich nicht stimmt bei csdef
-            %nicht beides auf einmal, erst diese cst matrix machen dann mit
-            %dem InputTrafoLin von UVLMData vergleichen.
-            %außerdem ist diese Trafo ebenfalls abhängig von Vinf3D.... das
-            %bedeutet ich muss es auch in linearize definieren...... damnit
+        function vpT=generatePanelVelocityInputTransformation(solver)
             
+            %number bound panels
+            nB=size(solver.panels,2);            
+            %normal vector blockdiagonal matrix
+            normalvectorCell=num2cell(solver.colloc_nvec,1);
+            NZero=blkdiag(normalvectorCell{:});
+           
+            %matrices selecting x,y and z components
+            Sx=kron(eye(nB),[1 0 0]);
+            Sy=kron(eye(nB),[0 1 0]);
+            Sz=kron(eye(nB),[0 0 1]);
+            
+            
+            vpT=ss([blkdiag(NZero',NZero');[[Sx ;Sy;Sz] zeros(nB*3,nB*3)]]);
+            
+            
+            vpT.InputName=[ cellstr([repmat(['vP_x_'; 'vP_y_';'vP_z_'],nB,1) num2str(reshape(repmat(1:nB,3,1),3*nB,1),'%04d')]);...
+                            cellstr([repmat(['vPDot_x_'; 'vPDot_y_';'vPDot_z_'],nB,1) num2str(reshape(repmat(1:nB,3,1),3*nB,1),'%04d')]);];
+            
+            vpT.OutputName=[   cellstr([repmat('b_',nB,1) num2str([1:nB]','%04d')]);...
+                                cellstr([repmat('bDot_',nB,1) num2str([1:nB]','%04d')]);...
+                                cellstr([repmat('vSInf_x_',nB,1) num2str([1:nB]','%04d')]);...
+                                cellstr([repmat('vSInf_y_',nB,1) num2str([1:nB]','%04d')]);...
+                                cellstr([repmat('vSInf_z_',nB,1) num2str([1:nB]','%04d')]);];
+            vpT.OutputGroup.b=[1:nB];
+            vpT.OutputGroup.bDot=[nB+1:2*nB];
+            vpT.OutputGroup.vSInf_x=[nB*2+1:3*nB];
+            vpT.OutputGroup.vSInf_y=[nB*3+1:4*nB];
+            vpT.OutputGroup.vSInf_z=[nB*4+1:5*nB];
+            vpT.InputGroup.vP=[1:3*nB];
+            vpT.InputGroup.vPDot=[3*nB+1:6*nB];
+        end
+        function csT=generateCsInputTransformation(solver,Vlin)
+                       
             %number bound panels
             nB=size(solver.panels,2);    
             %number of control surface inputs
@@ -314,8 +415,8 @@ classdef class_UVLM_SSM
             %prealloc
             csT=zeros(nB*5,nCs*3);
             for iCs=1:nCs
-                csT(:,(iCs-1)*3+1:(iCs)*3)=[    (solver.Khat(:,:,iCs)*NZero)'*Ihat*Vlin'...
-                            -NZero'*solver.Khat(:,:,iCs)*Rcs2...
+                csT(:,(iCs-1)*3+1:(iCs)*3)=[    (solver.Khat(:,:,iCs)*NZero)'*Ihat*Vlin'... %<- influence due to deflection
+                            -NZero'*solver.Khat(:,:,iCs)*Rcs2...                             %<- influence on b due to speed
                             zeros(nB,1); ...
                             %
                             zeros(nB,1)...
@@ -334,8 +435,15 @@ classdef class_UVLM_SSM
                             -Sz*solver.Khat(:,:,iCs)*Rcs2s...
                             zeros(nB,1);];
             end
+            %resort cST so that input is [dCs(1..nCs); dCsDot(1..nCs); dCsDdot(1..nCs);]
+            csT=[csT(:,1:3:nCs*3) csT(:,2:3:nCs*3) csT(:,3:3:nCs*3)];
             csT=ss(csT);
-            csT.InputName=strcat(repmat({'dCs_'; 'dCsDot_';'dCsDotDot_'},nCs,1), cellstr(num2str(reshape(repmat(1:nCs,3,1),3*nCs,1),'%04d')));
+            %old naming (cs by cs sorting, not all cs then all csdot then all csdotdot
+%             csT.InputName=strcat(repmat({'dCs_'; 'dCsDot_';'dCsDotDot_'},nCs,1), cellstr(num2str(reshape(repmat(1:nCs,3,1),3*nCs,1),'%04d')));
+            %new naming
+            csT.InputName=[     cellstr([repmat('dCs_',nCs,1) num2str([1:nCs]','%04d')]);...
+                                cellstr([repmat('dCsDot_',nCs,1) num2str([1:nCs]','%04d')]);...
+                                cellstr([repmat('dCsDotDot_',nCs,1) num2str([1:nCs]','%04d')]);];
             csT.OutputName=[   cellstr([repmat('b_',nB,1) num2str([1:nB]','%04d')]);...
                                 cellstr([repmat('bDot_',nB,1) num2str([1:nB]','%04d')]);...
                                 cellstr([repmat('vSInf_x_',nB,1) num2str([1:nB]','%04d')]);...
@@ -344,11 +452,67 @@ classdef class_UVLM_SSM
            
             csT.OutputGroup.b=[1:nB];
             csT.OutputGroup.bDot=[nB+1:2*nB];
-            rbmT.OutputGroup.vSInf_x=[nB*2+1:3*nB];
-            rbmT.OutputGroup.vSInf_y=[nB*3+1:4*nB];
-            rbmT.OutputGroup.vSInf_z=[nB*4+1:5*nB];
+            csT.OutputGroup.vSInf_x=[nB*2+1:3*nB];
+            csT.OutputGroup.vSInf_y=[nB*3+1:4*nB];
+            csT.OutputGroup.vSInf_z=[nB*4+1:5*nB];
+            csT.InputGroup.dCs=[1:nCs];
+            csT.InputGroup.dCsDot=[nCs+1:2*nCs];
+            csT.InputGroup.dCsDotDot=[2*nCs+1:3*nCs];
                     
                     
+        end
+        function vgT=generateGustInputTransformation(solver)
+            
+            %number bound panels
+            nB=size(solver.panels,2);            
+            %number of gust Zones
+            nGz=length(solver.gustZones);
+            %Mapping matrix for gust zones
+            M=zeros(nB,nGz);
+            for iGz=1:nGz
+                M(solver.gustZones{iGz},iGz)=1;
+            end
+            %when there is no gust zone specified, use all panels as one
+            %gust Zone
+            if isempty(M)
+                nGz=1;
+                M=ones(nB,1);
+            end
+            %normal vector blockdiagonal matrix
+            normalvectorCell=num2cell(solver.colloc_nvec,1);
+            NZero=blkdiag(normalvectorCell{:});
+            
+            %matrices selecting x,y and z components
+            Sx=kron(eye(nB),[1 0 0]);
+            Sy=kron(eye(nB),[0 1 0]);
+            Sz=kron(eye(nB),[0 0 1]);
+            %T matrix which transforms gust velocities or accelerations on
+            %b or bDot
+            T=NZero'*kron(M,eye(3));
+            %Txyz matrix which transforms gust velocities on Vsinfxyz
+            Tx=Sx*kron(M,eye(3));
+            Ty=Sy*kron(M,eye(3));
+            Tz=Sz*kron(M,eye(3));
+            
+            
+            vgT=ss([blkdiag(T,T);[[Tx;Ty;Tz] zeros(3*nB,3*nGz)]]);
+            
+            
+            vgT.InputName=[ cellstr([repmat(['vG_x_'; 'vG_y_';'vG_z_'],nGz,1) num2str(reshape(repmat(1:nGz,3,1),3*nGz,1),'%04d')]);...
+                            cellstr([repmat(['vGDot_x_'; 'vGDot_y_';'vGDot_z_'],nGz,1) num2str(reshape(repmat(1:nGz,3,1),3*nGz,1),'%04d')]);];
+            
+            vgT.OutputName=[   cellstr([repmat('b_',nB,1) num2str([1:nB]','%04d')]);...
+                                cellstr([repmat('bDot_',nB,1) num2str([1:nB]','%04d')]);...
+                                cellstr([repmat('vSInf_x_',nB,1) num2str([1:nB]','%04d')]);...
+                                cellstr([repmat('vSInf_y_',nB,1) num2str([1:nB]','%04d')]);...
+                                cellstr([repmat('vSInf_z_',nB,1) num2str([1:nB]','%04d')]);];
+            vgT.OutputGroup.b=[1:nB];
+            vgT.OutputGroup.bDot=[nB+1:2*nB];
+            vgT.OutputGroup.vSInf_x=[nB*2+1:3*nB];
+            vgT.OutputGroup.vSInf_y=[nB*3+1:4*nB];
+            vgT.OutputGroup.vSInf_z=[nB*4+1:5*nB];
+            vgT.InputGroup.vG=[1:3*nGz];
+            vgT.InputGroup.vGDot=[3*nGz+1:6*nGz];
         end
         
         

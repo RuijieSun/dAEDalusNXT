@@ -26,6 +26,12 @@ classdef class_aerosurface
         
         wing_segments;  % array of wing segments
         
+        % This struct will hold the following information about this wing
+        % segment's structure:
+        % fs_segments: [eta_root, xsi_root, eta_tip, xsi_tip,  t_web, t_top, t_bottom]
+        % rs_segments: [eta_root, xsi_root, eta_tip, xsi_tip,  t_web, t_top, t_bottom]
+        wings_structural_properties;
+        
         % for 2D grid
         grid_start_idx;
         panel_start_idx;
@@ -106,6 +112,297 @@ classdef class_aerosurface
         grid_3D=1;
     end
     
+    methods (Static)
+        
+        function [obj, b_ref] = create_from_cpacs(tixi, tigl, wingIndex)
+            obj = class_aerosurface();
+            
+            uID = tiglWingGetUID(tigl, wingIndex);
+            
+            b_ref = tiglWingGetSpan(tigl, uID);
+
+            x_wing = tixiUIDGetXPath(tixi, uID);
+            try
+                obj.name = tixiGetTextElement(tixi, [x_wing, '/name']);
+            catch
+                obj.name = '';
+            end
+
+            obj.symmetric = 0;
+            if tiglWingGetSymmetry(tigl, wingIndex) ~= 0
+                obj.symmetric = 1;
+            end
+            
+            % First we can create the segments. We can split these later if
+            % necessary.
+            n_segments = tiglWingGetSegmentCount(tigl, wingIndex);
+            if n_segments == 1
+                obj.wing_segments = ...
+                    class_wingsegment.create_from_cpacs(tixi, tigl, wingIndex, 1);
+                obj.wing_segments.symmetric = obj.symmetric;
+            else
+                for i = 1:n_segments
+                    segment = ...
+                        class_wingsegment.create_from_cpacs(tixi, tigl, wingIndex, i);
+                    segment.symmetric = obj.symmetric;
+
+                    if isempty(obj.wing_segments)
+                        obj.wing_segments = segment;
+                    else
+                        obj.wing_segments(end+1) = segment;
+                    end
+                end
+            end
+
+            n_compSegments = tiglWingGetComponentSegmentCount(tigl, wingIndex);
+            obj.wings_structural_properties.fs_segments = [];
+            obj.wings_structural_properties.rs_segments = [];
+            obj.wings_structural_properties.frontspar = [];
+            obj.wings_structural_properties.rearspar = [];
+            obj.wings_structural_properties.is_fueled = [];
+            obj.wings_structural_properties.material = {};
+            if n_compSegments ~= 0
+                % loop over all component segments
+                for i = 1:n_compSegments
+                    compSegUID = tiglWingGetComponentSegmentUID(tigl, wingIndex, i);
+                    x_compSeg = tixiUIDGetXPath(tixi, compSegUID);
+                    n_segs_in_compSeg = tiglWingComponentSegmentGetNumberOfSegments(tigl, compSegUID);
+                    
+                    % check if a structure is defined for this segment
+                    if tixiGetNamedChildrenCount(tixi, x_compSeg, 'structure')
+                        x_struct = [x_compSeg, '/structure'];
+                    
+                        % check if there are spars for this segment
+                        if tixiGetNamedChildrenCount(tixi, x_struct, 'spars')
+                            x_spSegs = [x_struct, '/spars/sparSegments'];
+                            n_spSegs = tixiGetNamedChildrenCount(tixi, x_spSegs, 'sparSegment');
+                            
+                            segmentUIDs = cell(1, n_segs_in_compSeg);
+                            innerElemUIDs = cell(1, n_segs_in_compSeg);
+                            outerElemUIDs = cell(1, n_segs_in_compSeg);
+                            sectionEtas = nan(2*(n_segs_in_compSeg + 1), 1);
+                            segmentIndices = zeros(1, n_segs_in_compSeg);
+                            for j = 1:n_segs_in_compSeg
+                                segmentUIDs{j} = tiglWingComponentSegmentGetSegmentUID(tigl, compSegUID, j);
+                                [segmentIndices(j), wingIndex] = tiglWingGetSegmentIndex(tigl, segmentUIDs{j});
+
+                                [~, innerElemUIDs{j}] = tiglWingGetInnerSectionAndElementUID(tigl, wingIndex, segmentIndices(j));
+                                [~, outerElemUIDs{j}] = tiglWingGetOuterSectionAndElementUID(tigl, wingIndex, segmentIndices(j));
+                                [eta_inner, ~] = tiglWingSegmentPointGetComponentSegmentEtaXsi(tigl, segmentUIDs{j}, compSegUID, 0, 0);  
+                                [eta_outer, ~] = tiglWingSegmentPointGetComponentSegmentEtaXsi(tigl, segmentUIDs{j}, compSegUID, 1, 0);
+                                
+                                sectionEtas(2*j - 1) = eta_inner;
+                                sectionEtas(2*j - 0) = eta_outer;
+                            end
+                            sectionEtas = unique(sectionEtas(~isnan(sectionEtas)));
+                            
+                            % spSegs will encode 2 point spar segments in its rows
+                            % as follows: [eta_1, xsi_1, eta_2, xsi_2, t_web, t_top, t_bottom]
+                            spSegs = zeros(0, 7);
+                            points = zeros(0, 2);
+
+                            for j = 1:n_spSegs
+                                x_spSeg = sprintf('%s/sparSegment[%i]', x_spSegs, j);
+                                n_spPos = tixiGetNamedChildrenCount(tixi, [x_spSeg, '/sparPositionUIDs'], 'sparPositionUID');
+
+                                pos_ = zeros(n_spPos, 2);
+                                % loop over all positions and store in pos array
+                                for k = 1:n_spPos
+                                    x_spPosUID = sprintf('%s/sparPositionUIDs/sparPositionUID[%i]', x_spSeg, k);
+                                    spPosUID = tixiGetTextElement(tixi, x_spPosUID);
+                                    x_spPos = tixiUIDGetXPath(tixi, spPosUID);
+
+                                    xsi = tixiGetDoubleElement(tixi, [x_spPos, '/xsi']);
+                                    
+                                    % Obtaining the eta is a little more
+                                    % complicated
+                                    if tixiGetNamedChildrenCount(tixi, x_spPos, 'eta') == 0
+                                        elemUID = tixiGetTextElement(tixi, [x_spPos, '/elementUID']);
+                                        
+                                        index = find(strcmp(innerElemUIDs, elemUID));
+                                        if ~isempty(index)
+                                            eta = 0;
+                                        else
+                                            index = find(strcmp(outerElemUIDs, elemUID));
+                                            eta = 1;
+                                        end
+                                            
+                                        [eta, ~] = tiglWingSegmentPointGetComponentSegmentEtaXsi(tigl, segmentUIDs{index}, compSegUID, eta, xsi);
+                                        [~, id_sec] = min(abs(sectionEtas - eta));
+                                        eta = sectionEtas(id_sec);
+                                    else
+                                        eta = tixiGetDoubleElement(tixi, [x_spPos, '/eta']);
+                                        d_eta = abs(sectionEtas - eta);
+                                        id_sec = find(round(d_eta, 2) == 0);
+                                        if ~isempty(id_sec)
+                                            warning('A spar was positioned very close to a section (eta difference = %.6f). Spar will be put exactly at this section.', d_eta);
+                                            eta = sectionEtas(id_sec(1));
+                                        end
+                                    end
+                                    
+                                    point = [eta, xsi];
+                                    pos_(k, :) = point;
+                                    points = [points; point];
+                                end
+                                
+                                ts = ones(1,3);            
+                                % Obtain the thicknesses of the wingbox
+                                x_spCS = [x_spSeg, '/sparCrossSection'];
+                                if tixiCheckElement(tixi, x_spCS)
+                                    x_t_web = [x_spCS, '/web1/material/thickness'];
+                                    if tixiCheckElement(tixi, x_t_web)
+                                        ts(1) = tixiGetDoubleElement(tixi, x_t_web);
+                                    end
+
+                                    x_t_top = [x_spCS, '/upperCap/material/thickness'];
+                                    if tixiCheckElement(tixi, x_t_top)
+                                        ts(2) =  tixiGetDoubleElement(tixi, x_t_top);
+                                    end
+
+                                    x_t_bot = [x_spCS, '/lowerCap/material/thickness'];
+                                    if tixiCheckElement(tixi, x_t_bot)
+                                        ts(3) = tixiGetDoubleElement(tixi, x_t_bot);
+                                    end
+                                end
+                                
+                                pos = [pos_(1:end-1, :), pos_(2:end, :)];
+                                spSeg = [pos, repmat(ts, size(pos, 1), 1)];
+                                spSegs = [spSegs; spSeg];
+                            end
+                            
+                            % To construct front and rear spars we loop
+                            % over all points and find the most forward and
+                            % aft points at their eta. The most forward
+                            % point becomes a node in the front spar, the
+                            % most aft becomes a node in the rear spar. At
+                            % these nodes we note the eta, xsi, and the
+                            % thicknesses of the corresponding segment. We
+                            % store these nodes in two matrices, one for
+                            % the front and another for the rear spar.
+                            % These matrices will be have size N x 5 such
+                            % that their rows are:
+                            % [eta, xsi, t_web, t_top, t_bottom]
+                            
+                            % We should present the user with a warning if
+                            % there are more than 2 points on a line,
+                            % because this means we are removing one or
+                            % possibly more middle spars.
+                            
+                            % Furthermore, we should check for each node of
+                            % the newly constructed front and rear spars if
+                            % it lies on a boundary between two wing
+                            % segments. If it doesn't we should split the
+                            % wing segment at this node.
+                            
+                            etas = unique(points(:, 1));
+                            n_points = size(etas, 1);
+                            
+                            nodes_fs_ = zeros(n_points, 5);
+                            nodes_fs_(:, 1) = etas;
+                            nodes_rs_ = nodes_fs_;
+                            
+                            % We do this loop in reverse to aid the process
+                            % of splitting segments.
+                            for j = n_points:-1:1
+                                % Only consider the spar segments that
+                                % start at, end at, or cross the eta of
+                                % the current point.
+                                segs_ = spSegs(spSegs(:, 1) <= etas(j) & spSegs(:, 3) >= etas(j), :);
+                                
+                                % Calculate the xsi values at the locations
+                                % at which a vertical line through the
+                                % current eta intersects each of the
+                                % segments under consideration.
+                                xsis = segs_(:, 2) + (segs_(:, 4) - segs_(:, 2))./(segs_(:, 3) - segs_(:, 1)).*(etas(j) - segs_(:, 1));
+                                
+                                % Check if there are more than 2 spar
+                                % segments that cross this eta. Give a
+                                % warning to let the user know we are
+                                % removing these segments here.
+                                if length(xsis) > 2
+                                    warning('There are more than two spars specified at a spanwise location. Only the most forward and aft will be kept.');
+                                end
+                                
+                                % The minimum xsi in this vector
+                                % corresponds to the front, and the maximum
+                                % to the rear spar.
+                                [nodes_fs_(j, 2), id_fs] = min(xsis);
+                                [nodes_rs_(j, 2), id_rs] = max(xsis);
+                                
+                                % Then, store the thicknesses of the
+                                % corresponding spar segments alongside the
+                                % new nodes.
+                                nodes_fs_(j, 3:end) = segs_(id_fs, 5:end);
+                                nodes_rs_(j, 3:end) = segs_(id_rs, 5:end);
+                                
+                                % Finally, check if this node lies
+                                % precisely on the boundary between two
+                                % wing segments. If it doesn't, split the
+                                % corresponding wing segment at this node.
+                                if all(etas(j) ~= sectionEtas)
+                                    % First get the id of the segment we're
+                                    % gonna split.
+                                    seg_num = find(etas(j) < sectionEtas, 1) - 1;
+                                    seg_id = segmentIndices(seg_num);
+                                    
+                                    % Now we need to find the eta of the
+                                    % split w.r.t. the segment.
+                                    inner_section_eta = sectionEtas(seg_num);
+                                    outer_section_eta = sectionEtas(seg_num + 1);                          
+                                    eta_seg = (etas(j) - inner_section_eta)/(outer_section_eta - inner_section_eta);
+                                    
+                                    % Then we can split the segment there
+                                    % and add the current node eta to the
+                                    % list of section etas.
+                                    obj = obj.split_segment(seg_id, eta_seg, 1);
+                                    sectionEtas = [sectionEtas(1:seg_num); etas(j); sectionEtas((seg_num+1):end)];
+                                    n_segs_in_compSeg = n_segs_in_compSeg + 1;
+                                    n_segments = n_segments + 1;
+                                    segmentIndices = [segmentIndices(1:seg_num), segmentIndices(seg_num:end)+1];
+                                end
+                            end
+                            
+                            % Now we need to make sure that there are spar
+                            % positions at each section. 
+                            nodes_fs = zeros(n_segs_in_compSeg + 1, 5);
+                            nodes_fs(2:end-1, 1) = sectionEtas(2:end-1);
+                            nodes_fs(end, 1) = 1;
+                            nodes_rs = nodes_fs;
+                            for j = 1:4
+                                nodes_fs(:, j+1) = interp1(nodes_fs_(:, 1), nodes_fs_(:, j+1), nodes_fs(:, 1), 'linear', 'extrap');
+                                nodes_rs(:, j+1) = interp1(nodes_rs_(:, 1), nodes_rs_(:, j+1), nodes_rs(:, 1), 'linear', 'extrap');
+                            end
+                            
+                            % Now we have to turn the lists of nodes back
+                            % into lists of spar segments with two end
+                            % points.
+                            fs_segments = [nodes_fs(1:end-1, 1:2), nodes_fs(2:end, 1:2), (nodes_fs(1:end-1, 3:end) + nodes_fs(2:end, 3:end))/2];
+                            rs_segments = [nodes_rs(1:end-1, 1:2), nodes_rs(2:end, 1:2), (nodes_rs(1:end-1, 3:end) + nodes_rs(2:end, 3:end))/2];
+                            
+                            % Finally, we can store the segments where they
+                            % belong.
+                            for j = 1:n_segs_in_compSeg
+                                obj.wing_segments(segmentIndices(j)).structural_properties.fs_segments = fs_segments(j, [2, 4:end]);
+                                obj.wing_segments(segmentIndices(j)).structural_properties.rs_segments = rs_segments(j, [2, 4:end]);
+                            end
+                                
+                            obj.wings_structural_properties.fs_segments = [obj.wings_structural_properties.fs_segments; fs_segments];
+                            obj.wings_structural_properties.rs_segments = [obj.wings_structural_properties.rs_segments; rs_segments];
+
+                            obj.wings_structural_properties.frontspar = [obj.wings_structural_properties.frontspar, nodes_fs(:, 2)'];
+                            obj.wings_structural_properties.rearspar = [obj.wings_structural_properties.rearspar, nodes_rs(:, 2)'];
+                        end
+                    end
+                end
+                
+                % For now aluminum is always used as the material for the
+                % wingbox and the wingbox is always fueled.
+                obj.wings_structural_properties.is_fueled = ones(1, n_segments);
+                obj.wings_structural_properties.material = repmat({'aluminum'}, 1, n_segments);
+            end
+        end
+    end
+    
     methods
         % constructor
         function obj = class_aerosurface(varargin)
@@ -155,9 +452,11 @@ classdef class_aerosurface
                 value7=varargin{19};
                 value8=varargin{21};
                 obj.wing_segments=class_wingsegment(pos,symmetric, dihed,LambdaSpec,Lambda,property1,value1,property2,value2,property3,value3,property4,value4,property5,value5,property6,value6,property7,value7,property8,value8);
-            else
+            elseif nargin ~= 0
                 obj.wing_segments=class_wingsegment(pos,symmetric, dihed,LambdaSpec,Lambda);
             end
+            
+            if nargin ~= 0
             
             %             obj.c_mac=cell2mat(obj.wing_segments.c_mac);
             %             obj.S=cell2mat(obj.wing_segments.S);
@@ -180,6 +479,7 @@ classdef class_aerosurface
             %
             %                 obj.c_mac=8*obj.S/((1+obj.TR)^2*obj.b^2)*(obj.b/2-(1-obj.TR)*obj.b/2+(1-obj.TR)^2*obj.b/6);
             %             end
+            end
             
         end
         
@@ -551,11 +851,11 @@ classdef class_aerosurface
         
         function panel_to_beam_element=compute_force_interpolation_matrix(obj,panel_to_beam_element,panels,grid)
             % for debugging
-            observer=1;
+            observer=0;
             
             % for debugging
             if observer==1
-                figure
+                figure(1)
                 % obj.plot_grid
                 hold on
             end
@@ -818,8 +1118,10 @@ classdef class_aerosurface
                                 end
                                 %TODO CHECK if comp idx is needed for main direction in initialize_beam_to_panel_for_block
                                 panel_to_beam_element=obj.initialize_beam_to_panel_for_block(beam_idx,k+1,block_next,panels,grid,panel_to_beam_element,0,comp_idx_2);
-                                h=fill3(block_next(1,:),block_next(2,:),block_next(3,:),'r');
-                                set(h,'facealpha',.25);
+                                if observer
+									h=fill3(block_next(1,:),block_next(2,:),block_next(3,:),'r');
+                                	set(h,'facealpha',.25);
+								end
                             end
                         end
                         next_segment=0;
@@ -861,8 +1163,10 @@ classdef class_aerosurface
                                 end
                                 %TODO CHECK if comp idx is needed for main direction in initialize_beam_to_panel_for_block
                                 panel_to_beam_element=obj.initialize_beam_to_panel_for_block(beam_idx,k-1,block_prev,panels,grid,panel_to_beam_element,0,comp_idx_2);
-                                h=fill3(block_prev(1,:),block_prev(2,:),block_prev(3,:),'r');
-                                set(h,'facealpha',.25);
+                                if observer
+									h=fill3(block_prev(1,:),block_prev(2,:),block_prev(3,:),'r');
+                                	set(h,'facealpha',.25);
+								end
                             end
                         end
                         prev_segment=0;
@@ -898,8 +1202,10 @@ classdef class_aerosurface
                 end
                 if sum>eps
                     if sum<0.98
-                        h=fill3(grid(1,panels(:,j)),grid(2,panels(:,j)),grid(3,panels(:,j)),'y');
-                        set(h,'facealpha',.25);
+						if observer
+                        	h=fill3(grid(1,panels(:,j)),grid(2,panels(:,j)),grid(3,panels(:,j)),'y');
+                        	set(h,'facealpha',.25);
+						end
                     end
                     %                      beam_splits=0;
                     for i=2:5:size(panel_to_beam_element,2)
@@ -912,7 +1218,7 @@ classdef class_aerosurface
                     end
                 end
             end
-            
+            if observer
                 %plotting legend
                 [~,h1]=legend('1','2','3','4');
                
@@ -921,6 +1227,7 @@ classdef class_aerosurface
                 set(h1(7), 'faceColor', 'y')
                 set(h1(8), 'facea', 0.25)
                 set(h1(8), 'faceColor', 'r')
+			end
                 
             if obj.symmetric==1
                 n_beam=beam_idx-2;
@@ -1031,7 +1338,7 @@ classdef class_aerosurface
         end
         
         function panel_to_beam_element=initialize_beam_to_panel_for_block(obj,beam_idx,k,block,panels,grid,panel_to_beam_element,mirr,comp_idx)
-            observer=1;
+            observer=0;
             plotBtp=0; % debug plot by simon 
             if mirr==1
                 grid_offset=length(obj.panels)/2;
@@ -1443,12 +1750,17 @@ classdef class_aerosurface
 %                 frontspar
 %                 rearspar
                 if obj.isExternalFEM==0
-                    obj.wing_segments(i)=obj.wing_segments(i).compute_wingbox_coords(frontspar(ctr:ctr+1),rearspar(ctr:ctr+1),n);
+                    if nargin == 3
+                        obj.wing_segments(i) = obj.wing_segments(i).compute_wingbox_coords([], [], n);
+                    else
+                        obj.wing_segments(i)=obj.wing_segments(i).compute_wingbox_coords(frontspar(ctr:ctr+1),rearspar(ctr:ctr+1),n);
+                    end
                 elseif obj.isExternalFEM==1
                     obj.wing_segments(i) = obj.wing_segments(i).read_wingbox_coords(obj.pathNodeCoords, n, iNodes);
                 else
                     disp('ERROR: wing.isExternalFEM not correctly defined!')
                 end
+                
                 if isempty(wingbox_coords)
                     wingbox_coords=[wingbox_coords obj.wing_segments(i).wingbox_coords];
                     wingbox_c4=[wingbox_c4 obj.wing_segments(i).wingbox_c4];
@@ -1713,9 +2025,10 @@ classdef class_aerosurface
                     end
                 end
             else
-                fprintf('Unknown Data Format');
+                fprintf('Unknown Data Format: %s \n', xmlstruct.tag);
             end
         end
+        
         function obj=  computeControlSurfacePanelIds(obj)
                 for iSeg=1:length(obj.wing_segments)
                     obj.wing_segments(iSeg)=obj.wing_segments(iSeg).computeControlSurfacePanelIds();

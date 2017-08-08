@@ -55,12 +55,7 @@ else
     zw7=Km;
     K_tot_mean(:,7:end)=[zw5;zw6;zw7];
 end
- 
-    
 
-
-
-       
 mode_idx=[1:n_modes size(Q,1)-nC+1:size(Q,1)];
 
 Q=Q(mode_idx,mode_idx,1:end);
@@ -69,9 +64,10 @@ k=k(1:end);
 gamma=k;
 
 [A0, A1, A2, Arest] = rogers_state_space_approximation(Q,k,gamma);
-[A0ms,A1ms,A2ms,Ems,Dms] = minimum_state_approximation(Q,k,gamma,40);
+[A0ms,A1ms,A2ms,Ems,Dms,gamma_ms] = minimum_state_approximation_opt(Q,k,gamma,60);
 
 nL=length(gamma);
+AeroelasticSSM.gamma_ms=gamma_ms;
 AeroelasticSSM.gamma=gamma;
 AeroelasticSSM.nR=nR;
 AeroelasticSSM.nE=nE;
@@ -99,11 +95,11 @@ AeroelasticSSM.S_ref=aircraft.reference.S_ref;
 AeroelasticSSM.modeshapes=aircraft_structure.modeshapes(:,nR+1:nR+nE);
 AeroelasticSSM.acc_dof_idx=[1 2 3 4 5 6];
 
-
+figure;
 for V=1:0.5:V_max
 %    [AS,ASre,ASee,ASce,ASge,ASrr,AScc,ASgg,Mae,Cae,Kae,Alag,Ks,Ms,ASpre]=generate_roger_SSM_ext(A0,A1,A2,Arest,M_tot_mean(1:nR+nE,1:nR+nE),K_tot_mean(1:nR+nE,1:nR+nE),aircraft,gamma,V,rho_air,nC,nG);
 %    [msAS,msASrr,msASre,msASce,msASge,msASee,Kae,Cae,Mae]=generate_minimum_state_SSM(A0ms,A1ms,A2ms,Ems,Dms,M_tot_mean(1:nR+nE,1:nR+nE),K_tot_mean(1:nR+nE,1:nR+nE),aircraft,gamma,V,rho_air,nC,nG);
-    [AeroelasticSSM]=generate_minimum_state_elasticSSM(A0ms,A1ms,A2ms,Ems,Dms,M_tot_mean(nR+1:nR+nE,nR+1:nR+nE),K_tot_mean(nR+1:nR+nE,nR+1:nR+nE),aircraft,gamma,V,rho_air,AeroelasticSSM);
+    [AeroelasticSSM]=generate_minimum_state_elasticSSM(A0ms,A1ms,A2ms,Ems,Dms,M_tot_mean(nR+1:nR+nE,nR+1:nR+nE),K_tot_mean(nR+1:nR+nE,nR+1:nR+nE),aircraft,gamma_ms,V,rho_air,AeroelasticSSM);
     [AeroelasticSSM]=generate_roger_elasticSSM(A0,A1,A2,Arest,M_tot_mean(nR+1:nR+nE,nR+1:nR+nE),K_tot_mean(nR+1:nR+nE,nR+1:nR+nE),aircraft,gamma,V,rho_air,AeroelasticSSM);
     %[msAS,msASre,msASce,msASge,msASee,msKae,msCae,msMae,msA0rs,msASrs,msAScrs,msASgrs,msASrr]=minimum_state_SSM_coupled_dynamics(A0ms,A1ms,A2ms,Ems,Dms,[1 2 3 4 5 6],mode_idx(7:end-nG-nC),mode_idx(end-nG-nC+1:end-nG),mode_idx(end-nG+1:end),gamma,length(gamma),aircraft,aircraft_state,Mse,Kse,V_start,rho,0,0);
     eigenvAA=eig(AeroelasticSSM.ASee);
@@ -120,7 +116,8 @@ for V=1:0.5:V_max
          disp(['re>0, V ',num2str(V)]);
      end
 end
-
+[AeroelasticSSM]=generate_minimum_state_elasticSSM(A0ms,A1ms,A2ms,Ems,Dms,M_tot_mean(nR+1:nR+nE,nR+1:nR+nE),K_tot_mean(nR+1:nR+nE,nR+1:nR+nE),aircraft,gamma_ms,V_max,rho_air,AeroelasticSSM);   % AeroelasticSSM computed for V_max
+[AeroelasticSSM]=generate_roger_elasticSSM(A0,A1,A2,Arest,M_tot_mean(nR+1:nR+nE,nR+1:nR+nE),K_tot_mean(nR+1:nR+nE,nR+1:nR+nE),aircraft,gamma,V_max,rho_air,AeroelasticSSM);                      % AeroelasticSSM computed for V_max
 AeroelasticSSM.selGAC=eye(nE,length(AeroelasticSSM.msASee));
 AeroelasticSSM.selGACdot=[zeros(nE,nE) eye(nE,length(AeroelasticSSM.msASee)-nE)];
 

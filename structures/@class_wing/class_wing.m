@@ -106,10 +106,10 @@ classdef class_wing < class_beam
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     methods (Access=public)
          % constructor
-         function obj = class_wing(nel,crosssection,varargin)
+         function obj = class_wing(nel, crosssections, varargin)
             %call class_beam constructor 
-            obj=obj@class_beam(nel,crosssection,varargin);
-            obj.deltanu=zeros((nel*6+6)/3,1);
+            obj=obj@class_beam(nel, crosssections, varargin);
+            obj.deltanu=zeros((length(crosssections)*6+6)/3,1);
          end
          
          % returns deflections at quarter chord line of wing ( for
@@ -527,7 +527,7 @@ classdef class_wing < class_beam
                  end
                  
                  mid_rot=wing.beamelement(i).T(1:3,1:3)'*mid_rot;
-                 %midp_defl=[midp(1)+mid_def(1),midp(2)+mid_def(2),midp(3)+mid_def(3)]';
+                 midp=[midp(1)+mid_def(1),midp(2)+mid_def(2),midp(3)+mid_def(3)]';
                  
                  h=wing.beamelement(i).crosssection.h;
                  w=wing.beamelement(i).crosssection.w;
@@ -785,7 +785,12 @@ classdef class_wing < class_beam
             xlabel('X')
             text(0,delta,-delta/2,['Qx_{max}=' sprintf('%4.3gMN',maxQx/10^6)],'BackgroundColor','white');
             axis equal
-         end   
+         end
+         function obj=f_set_fuelingFactor(obj,fuelingFactor)
+             for i=1:length(obj.beamelement)
+                obj.beamelement(i).crosssection.fueling_factor=fuelingFactor;
+             end
+         end
     end  
 end
 

@@ -25,8 +25,7 @@ function obj=elM_6dof(obj)
    else
        rho_t=obj.m/obj.A;
    end
-   massless=0;
-   if massless
+   if obj.is_massless
        obj.m=0;
        rho_t=obj.m/obj.A;
    end
@@ -78,7 +77,7 @@ function obj=elM_6dof(obj)
         0,      0,      0,      0,      (rho_t*J*L)*(2/6)*420/m,  0;
         22*L,   0,      0,      0,      0,  4*L^2;];
     obj.elM=m/420*[Q1,Q2;Q3,Q4];
-    if massless
+    if obj.is_massless
         obj.elM(isnan(obj.elM))=0;
     end
    % obj.elM=m/420*diag([-1 1 1 -1 1 1 -1 1 1 -1 1 1])'*[Q1,Q2;Q3,Q4]*diag([-1 1 1 -1 1 1 -1 1 1 -1 1 1]);

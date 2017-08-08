@@ -156,10 +156,10 @@ void compute_influence_vring3D(double *grid,double *panels, double *colloc,doubl
                     wAB_2=wAB_2-r1xr2_2/(norm_r1xr2*norm_r1xr2)*dotp_r0_r1dr2;
                     wAB_3=wAB_3-r1xr2_3/(norm_r1xr2*norm_r1xr2)*dotp_r0_r1dr2;
                 }
-                else
-                {
-                    mexPrintf("no influence because of coredist, i  %d j %d k %d\n",i,j,k);
-                }
+                //else
+                //{
+               //     mexPrintf("no influence because of coredist, i  %d j %d k %d\n",i,j,k);
+                //}
             }
            //  *(w+n_colloc*k+j)=*(colloc_nvec+j*3)*wAB_1+*(colloc_nvec+1+j*3)*wAB_2+*(colloc_nvec+2+j*3)*wAB_3;
             //if ((wAB_1>-20)&&(wAB_1<20)){

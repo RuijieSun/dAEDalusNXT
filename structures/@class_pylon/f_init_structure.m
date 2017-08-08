@@ -11,7 +11,7 @@ pylon_struct.node_coords(1,1)=pylon_geo.center_coords(1,1)';
 pylon_struct.node_coords(1,2)=pylon_geo.center_coords(2,1)';
 pylon_struct.node_coords(1,3)=pylon_geo.center_coords(3,1)';
 
-pylon_struct.node_coords(2,1)=pylon_geo.center_coords(1,2)'-0.1;%0.1*pylon_geo.center_coords(1,1)'+0.9*pylon_geo.center_coords(1,2)';
+pylon_struct.node_coords(2,1)=pylon_geo.center_coords(1,2)'+1;%0.1*pylon_geo.center_coords(1,1)'+0.9*pylon_geo.center_coords(1,2)';
 pylon_struct.node_coords(2,2)=pylon_geo.center_coords(2,2)';%0.1*pylon_geo.center_coords(2,1)'+0.9*pylon_geo.center_coords(2,2)';
 pylon_struct.node_coords(2,3)=pylon_geo.center_coords(3,2)';%0.1*pylon_geo.center_coords(3,1)'+0.9*pylon_geo.center_coords(3,2)';
 

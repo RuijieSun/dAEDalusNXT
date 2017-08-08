@@ -9,12 +9,12 @@ function [aircraft,flight_state,wingaero ] = trim_aircraft_unsteady(aircraft,fli
 %UNTITLED4 Summary of this function goes here
 %   Detailed explanation goes here
 
-dt=0.002;
+dt=0.4; % here, a large timestep can be chosen since the trimming does not depend on the wake - a larger timestep leads to less panels in the wake. trimming is then faster
 wingaero.t_step=dt;
 
 trim_name3=[];
 trim_name4=[];
-consider_thrust=0;
+consider_thrust=1;
 for i=1:length(flight_state.aircraft_state.control_deflections)
     %if (flight_state.aircraft_state.control_deflections{i}>=1E-4)
         aircraft=aircraft.f_set_control_surface(flight_state.aircraft_state.control_surfaces{i},flight_state.aircraft_state.control_deflections{i});
@@ -106,13 +106,13 @@ wingaero=wingaero.f_solve_for_Cl(flight_state.get_Cl(aircraft.reference.S_ref));
 
 aircraft=aircraft.compute_CD_f(flight_state.aerodynamic_state,aircraft.reference.S_ref);
 if consider_thrust==1
-    wingaero=wingaero.f_solve_full();
-    T_pe=((aircraft.CD_f+wingaero.Cdi)*1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref)/length(aircraft.engines)*cos(atan(wingaero.Uinf(3)/wingaero.Uinf(1)));
+%     wingaero=wingaero.f_solve_full();
+    T_pe=((aircraft.CD_f+wingaero.Cdi(end))*1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref)/length(aircraft.engines)/cos(atan(wingaero.Uinf(3)/wingaero.Uinf(1)));   % Mistake in resolution of forces corrected - 3 occurences
     delta_CM=0;
     delta_Cl=0;
     for i=1:length(aircraft.engines)
         aircraft.engines(i).delta_t=T_pe/aircraft.engines(i).thrust;
-        delta_CM=delta_CM-(aircraft.engines(i).cg_pos(3)-flight_state.aerodynamic_state.p_ref(3))*T_pe/(1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref);
+        delta_CM=delta_CM-(aircraft.engines(i).cg_pos(3)-flight_state.aerodynamic_state.p_ref(3))*T_pe/(1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref*aircraft.reference.c_ref);
         delta_Cl=delta_Cl+T_pe*sin(atan(wingaero.Uinf(3)/wingaero.Uinf(1)))/(1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref);
     end
 else
@@ -153,13 +153,13 @@ else
 end
 wingaero=wingaero.f_solve_for_Cl(flight_state.get_Cl(aircraft.reference.S_ref)-delta_Cl);
 if consider_thrust==1
-    wingaero=wingaero.f_solve_full();
-    T_pe=((aircraft.CD_f+wingaero.Cdi)*1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref)/length(aircraft.engines)*cos(atan(wingaero.Uinf(3)/wingaero.Uinf(1)));
+%     wingaero=wingaero.f_solve_full();
+    T_pe=((aircraft.CD_f+wingaero.Cdi(end))*1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref)/length(aircraft.engines)/cos(atan(wingaero.Uinf(3)/wingaero.Uinf(1)));
     delta_CM=0;
     delta_Cl=0;
     for i=1:length(aircraft.engines)
         aircraft.engines(i).delta_t=T_pe/aircraft.engines(i).thrust;
-        delta_CM=delta_CM-(aircraft.engines(i).cg_pos(3)-flight_state.aerodynamic_state.p_ref(3))*T_pe/(1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref);
+        delta_CM=delta_CM-(aircraft.engines(i).cg_pos(3)-flight_state.aerodynamic_state.p_ref(3))*T_pe/(1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref*aircraft.reference.c_ref);
         delta_Cl=delta_Cl+T_pe*sin(atan(wingaero.Uinf(3)/wingaero.Uinf(1)))/(1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref);
     end
 else
@@ -210,13 +210,13 @@ while(abs(wingaero.CM+delta_CM)>1E-5)
 %     wingaero=wingaero.compute_influence_coeff_matrix();
     wingaero=wingaero.f_solve_for_Cl(flight_state.get_Cl(aircraft.reference.S_ref)-delta_Cl);
     if consider_thrust==1
-        wingaero=wingaero.f_solve_full();
-        T_pe=((aircraft.CD_f+wingaero.Cdi)*1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref)/length(aircraft.engines)*cos(atan(wingaero.Uinf(3)/wingaero.Uinf(1)));
+%         wingaero=wingaero.f_solve_full();
+        T_pe=((aircraft.CD_f+wingaero.Cdi(end))*1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref)/length(aircraft.engines)/cos(atan(wingaero.Uinf(3)/wingaero.Uinf(1)));
         delta_CM=0;
         delta_Cl=0;
         for i=1:length(aircraft.engines)
             aircraft.engines(i).delta_t=T_pe/aircraft.engines(i).thrust;
-            delta_CM=delta_CM-(aircraft.engines(i).cg_pos(3)-flight_state.aerodynamic_state.p_ref(3))*T_pe/(1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref);
+            delta_CM=delta_CM-(aircraft.engines(i).cg_pos(3)-flight_state.aerodynamic_state.p_ref(3))*T_pe/(1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref*aircraft.reference.c_ref);
             delta_Cl=delta_Cl+T_pe*sin(atan(wingaero.Uinf(3)/wingaero.Uinf(1)))/(1/2*flight_state.aerodynamic_state.rho_air*norm(wingaero.Uinf)^2*aircraft.reference.S_ref);
         end
         
@@ -259,5 +259,8 @@ for i=1:length(flight_state.aircraft_state.control_surfaces)
 end
 
 flight_state.aircraft_state.control_deflections=aircraft.control_deflections;
+ if consider_thrust==1
+     flight_state.aircraft_state.engine_thrust=T_pe;
+ end
 end
 

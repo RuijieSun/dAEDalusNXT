@@ -16,9 +16,9 @@ classdef class_UVLM_SSM_settings
         sectPress=1
         %reduction method 'bpod', 'balred'
         redMethod='bpod'
-        %reduction order (lpvkernel)
-        redOrder=50
-        
+        %reduction order (lpvkernel); if set to zero, no reduction is
+        %carried out
+        redOrder=0
     end
     
     methods

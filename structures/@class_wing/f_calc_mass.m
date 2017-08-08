@@ -19,8 +19,18 @@ function wing = f_calc_mass(wing,weights)
     Awing=wing.Awing;
     V_wingbox=0;
     
-    disp('            performing eigenmass calculation');
+    observer = 0;
+    if observer
+        disp('            performing eigenmass calculation');
+    end
     %wingsection={wing.beamelement(:).crosssection};
+    
+    % First we calculate the area of the wing outside the wingbox
+    % (so in front and behind of the spars)
+    A_out = Awing;
+    for i = 1:wing.nel
+        A_out = A_out - wing.beamelement(i).le * wing.beamelement(i).crosssection.w;
+    end
     
     m_fuel_total=0;
     fuel_volume_total=0;
@@ -34,7 +44,7 @@ function wing = f_calc_mass(wing,weights)
         w=wing.beamelement(i).crosssection.w;
         
         % calculate distributed mass from TSW (skin??)
-        el_m_s=weights.WingSkinEstimate/Awing*le*c;%*cos(phi);
+        el_m_s=weights.WingSkinEstimate/A_out*le*(c - w);%*cos(phi);
         % calculate mass from wing systems
 %         el_m_sys=weights.WingSystemsEstimate/Awing*le*c;%*cos(phi);
         el_m_sys=weights.WingSystemsEstimate/wing.V_wingbox*h*w*le;

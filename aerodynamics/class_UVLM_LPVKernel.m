@@ -40,7 +40,7 @@ classdef class_UVLM_LPVKernel
             %number of chordwise panels
             nC=length(solver.Abb)/nS;
             %number of bound panels
-            nB=nC*nS;
+            nB=size(solver.panels,2);
             %xW describes the spacing of the wake grid
             xW=solver.grid_wake(1,solver.panels_wake(1,1+2*nS))-solver.grid_wake(1,solver.panels_wake(1,nS+1));
             
@@ -71,7 +71,13 @@ classdef class_UVLM_LPVKernel
             %K5 is an eye matrix of the number of spanwise panels 
             K5=-eye(nS); 
             %K6 is transport within rest wake
-            K6=([zeros(nS,nWR) ;eye(nWR-nS) zeros(nWR-nS,nS)]-eye(nWR))*Vref/xW;
+%             K6=([zeros(nS,nWR) ;eye(nWR-nS) zeros(nWR-nS,nS)]-blkdiag(eye(nWR-nS),eye(nS)))*Vref/xW;
+%             K6(end-nS+1:end,:)=K6(end-nS+1:end,:)*2701;
+            dXVec=[ones(1,solver.settings.nFixedWakePanels) solver.settings.wakeGrowthFactor.^(1:solver.n_step-2-solver.settings.nFixedWakePanels) solver.settings.wakeGrowthFactor.^(solver.n_step+1-2-solver.settings.nFixedWakePanels)+solver.settings.addLengthFactorLastPanel/solver.settings.wakelength_factor*solver.n_step];
+            dXVec2=(((dXVec(2:end)+dXVec(1:end-1))/2));
+%             dXVec2(1:end-1)=1;
+            K6=([zeros(nS,nWR) ;diag(repelem(1./dXVec2,nS)) zeros(nWR-nS,nS)]-blkdiag(eye(nS),diag(repelem(1./dXVec2,nS))))*Vref/xW;
+%             K6=([zeros(nS,nWR) ;eye(nWR-nS) zeros(nWR-nS,nS)]-blkdiag(eye(nWR-nS),eye(nS)))*Vref/xW;
             %K7 is transport within first wake row
             K7=[eye(nS); zeros(nWR-nS,nS)]*Vref/xW;
             %% Assembly
@@ -124,7 +130,7 @@ classdef class_UVLM_LPVKernel
             obj.InputGroup.bDot=[nB+1:2*nB];
         end
         function obj=linearize(obj,V)
-            fprintf('linearizing kernel at V=%.3f m/s', V)
+            fprintf('linearizing kernel at V=%.3f m/s\n', V)
             
             obj.linSSM=ss(obj.a*V,obj.b*V,obj.c.*(obj.cF*V+obj.cF2),obj.d.*(obj.dF*V+obj.dF2));
             obj.linSSM.StateName=obj.stateNames;
@@ -134,7 +140,7 @@ classdef class_UVLM_LPVKernel
             obj.linSSM.OutputGroup=obj.OutputGroup;
         end
         function obj=reduce(obj,nOrder,type)
-            fprintf('reduce system to order %f using ', nOrder)
+            fprintf('reduce kernel to order %i using ', nOrder)
             fullSys=ss(obj.a,obj.b,obj.c,obj.d);
             if strcmp(type,'balred')
                 disp('balanced reduction')
@@ -152,7 +158,7 @@ classdef class_UVLM_LPVKernel
                 stepsimtime=0:0.1:3; % only 6 Timesteps
                 % empirical controllability
                 inputs=find(any(fullSysInt.b));  %<- only use inputs which have an influence, not sure if that works
-                [~, impT,impX]=impulse(fullSysInt(1,inputs),stepsimtime);
+                [~, impT,impX]=impulse(fullSysInt(1,inputs),stepsimtime);  %<- improve by using sss toolbox?
                 impTStep=impT(3)-impT(2);
                 impXper=permute(impX,[2 1 3]);
                 %remove integratorstatesdata)

@@ -50,9 +50,9 @@ classdef class_fuselage<class_beam
     
     methods (Access=public)
         
-         function obj = class_fuselage(nel,crosssection,varargin)
+         function obj = class_fuselage(nel, crosssections, varargin)
             %call class_beam constructor 
-            obj=obj@class_beam(nel,crosssection,varargin);
+            obj=obj@class_beam(nel, crosssections, varargin);
          end
          
          function struct_deflections=f_get_deflections(obj)
@@ -361,7 +361,7 @@ classdef class_fuselage<class_beam
             end
             
             aux_points=linspace(0,2*pi,18)';
-            
+            nodal_def=[fuselage.nodal_deflections(1:6:end) fuselage.nodal_deflections(2:6:end) fuselage.nodal_deflections(3:6:end)];
             for i=1:length(fuselage.beamelement)
                 [r]=fuselage.beamelement(i).crosssection.get_dimensions();
               
@@ -371,17 +371,17 @@ classdef class_fuselage<class_beam
                 cy_inner=(r-t_sk_eq(i))*cos(aux_points);
                 cz_inner=(r-t_sk_eq(i))*sin(aux_points);
                 
-                x_front=ones(18,1)*fuselage.node_coords(i,1);
-                y_front=ones(18,1)*fuselage.node_coords(i,2)+cy;
-                z_front=ones(18,1)*fuselage.node_coords(i,3)+cz;     
-                y_front_inner=ones(18,1)*fuselage.node_coords(i,2)+cy_inner;
-                z_front_inner=ones(18,1)*fuselage.node_coords(i,3)+cz_inner;
+                x_front=ones(18,1)*fuselage.node_coords(i,1)+nodal_def(i,1);
+                y_front=ones(18,1)*fuselage.node_coords(i,2)+cy+nodal_def(i,2);
+                z_front=ones(18,1)*fuselage.node_coords(i,3)+cz+nodal_def(i,3);     
+                y_front_inner=ones(18,1)*fuselage.node_coords(i,2)+cy_inner+nodal_def(i,2);
+                z_front_inner=ones(18,1)*fuselage.node_coords(i,3)+cz_inner+nodal_def(i,3);
 
-                x_rear=ones(18,1)*fuselage.node_coords(i+1,1);
-                y_rear=ones(18,1)*fuselage.node_coords(i+1,2)+cy;
-                z_rear=ones(18,1)*fuselage.node_coords(i+1,3)+cz;
-                y_rear_inner=ones(18,1)*fuselage.node_coords(i+1,2)+cy_inner;
-                z_rear_inner=ones(18,1)*fuselage.node_coords(i+1,3)+cz_inner;
+                x_rear=ones(18,1)*fuselage.node_coords(i+1,1)+nodal_def(i+1,1);
+                y_rear=ones(18,1)*fuselage.node_coords(i+1,2)+cy+nodal_def(i+1,2);
+                z_rear=ones(18,1)*fuselage.node_coords(i+1,3)+cz+nodal_def(i+1,3);
+                y_rear_inner=ones(18,1)*fuselage.node_coords(i+1,2)+cy_inner+nodal_def(i+1,2);
+                z_rear_inner=ones(18,1)*fuselage.node_coords(i+1,3)+cz_inner+nodal_def(i+1,3);
                 
                 for kk=1:17
                     fprintf(fileID,'ZONE T="%s_%s_1" I=2, J=2, K=2 F=BLOCK \n',num2str(beam_nr),num2str(i));

@@ -108,11 +108,9 @@ function obj = f_assemble(obj,add_eigenmass,add_fuelmass,add_engineforces,add_ge
 %       obj=obj.f_add_inertial_forces(add_engineforces,add_gearforces);
             obj=obj.f_add_nodal_mass_inertia(add_eigenmass);
         elseif obj.isExternalFEM == 1
-            if add_eigenmass
-                g = [obj.beamelement(1).ax;obj.beamelement(1).ay;obj.beamelement(1).az;0;0;0];
-                a = repmat(g,(length(obj.M)/6),1);
-                obj.Q = obj.Q + obj.M*a;
-            end
+            g = [obj.beamelement(1).ax;obj.beamelement(1).ay;obj.beamelement(1).az;0;0;0];
+            a = repmat(g,(length(obj.M)/6),1);
+            obj.Q = obj.Q + obj.M*a;
         end
         obj=obj.f_add_nodal_loads();
     end

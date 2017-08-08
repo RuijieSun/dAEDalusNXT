@@ -51,7 +51,8 @@ classdef class_flight_state
         function obj=class_flight_state(H,V,alpha,beta,aircraft_state)     
            obj.h=H;
            obj.V=V;
-           [rho_air,a,T,P,mu]=stdatmo(H);
+           [~,a,T,P,mu]=stdatmo(H);
+           [~,~,~,rho_air] = atmosisa(H);
            Uinf=norm(V);
            Ma=Uinf/a;
            obj.aerodynamic_state=class_aero_state(Uinf,alpha,beta,Ma,rho_air,mu);

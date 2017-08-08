@@ -190,14 +190,14 @@ classdef class_beam < matlab.mixin.Heterogeneous
         %>
         %> @return instance of the class_beam
         % =================================================================
-         function obj = class_beam(nel,crosssection,varargin)
+         function obj = class_beam(nel, crosssections, varargin)
              %set identifier if passed to function
              if ~isempty(varargin)
                 obj.identifier=cell2mat(varargin{1});
              end
              
              %initalize variables
-             obj.nel=nel;
+             obj.nel = nel;
              obj.ndof=obj.el_ndof*(obj.nel+1);
              
              obj.K=zeros(obj.ndof);
@@ -207,27 +207,21 @@ classdef class_beam < matlab.mixin.Heterogeneous
              obj.P=zeros(obj.ndof,1);
                           
              
-             obj.nodal_deflections=zeros(nel*obj.el_ndof+obj.el_ndof,1);
-             obj.nodal_deflections_loc=zeros(nel*obj.el_ndof+obj.el_ndof,1);
+             obj.nodal_deflections=zeros(obj.nel*obj.el_ndof+obj.el_ndof,1);
+             obj.nodal_deflections_loc=zeros(obj.nel*obj.el_ndof+obj.el_ndof,1);
 
-             obj.node_loadings=zeros(nel*obj.el_ndof+obj.el_ndof,1);
-             obj.nodal_loads=zeros(nel*obj.el_ndof+obj.el_ndof,1);
-             obj.nodal_loads_def=zeros(nel*obj.el_ndof+obj.el_ndof,1);
-             obj.nodal_masses=zeros((nel+1),7);
+             obj.node_loadings=zeros(obj.nel*obj.el_ndof+obj.el_ndof,1);
+             obj.nodal_loads=zeros(obj.nel*obj.el_ndof+obj.el_ndof,1);
+             obj.nodal_loads_def=zeros(obj.nel*obj.el_ndof+obj.el_ndof,1);
+             obj.nodal_masses=zeros((obj.nel+1),7);
              % only required for non-linear elements... possibly
              % differentiate later
-
-             % unpretty and performance killing workaround due to lack of object oriented
-             % functionality of MATALB, or my incapability
-                for i=1:nel
-                    if strcmp(crosssection,'none')
-                        beamelement(i)=class_beamelement(crosssection,obj);
-                    else
-                        beamelement(i)=class_beamelement(eval(crosssection),obj);
-                    end
-                    beamelement(i).nodal_deflections_loc=zeros(2*obj.el_ndof,1); 
-                end
-             obj.beamelement=beamelement;
+             
+             for i=1:obj.nel
+                 beamelement(i) = class_beamelement(crosssections(i), obj);
+                 beamelement(i).nodal_deflections_loc = zeros(2*obj.el_ndof,1); 
+             end
+             obj.beamelement = beamelement;
          end         
         % =================================================================
         %> @brief add a boundary condition to the beam
@@ -393,11 +387,11 @@ classdef class_beam < matlab.mixin.Heterogeneous
 
          end
         function obj=f_solve_modes_simon(obj,side)
-             %linker flï¿½gel constrained an wurzel
+             %linker flügel constrained an wurzel
              if strcmp(side,'left')
              K=obj.Kff(1:size(obj.beamelement,2)*6/2,1:size(obj.beamelement,2)*6/2);
              M=obj.Mff(1:size(obj.beamelement,2)*6/2,1:size(obj.beamelement,2)*6/2);
-             %rechter flï¿½gel constrained an wurzel
+             %rechter flügel constrained an wurzel
              elseif strcmp(side,'right')
              K=obj.Kff(size(obj.beamelement,2)*6/2+7:end,size(obj.beamelement,2)*6/2+7:end);
              M=obj.Mff(size(obj.beamelement,2)*6/2+7:end,size(obj.beamelement,2)*6/2+7:end);

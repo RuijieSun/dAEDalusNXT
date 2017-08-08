@@ -109,7 +109,8 @@ classdef class_fuselage_geometry
                     if obj.isExternalFEM==0
                         obj.fuselage_segments(i)=obj.fuselage_segments(i).compute_shell_coords(n);
                     elseif obj.isExternalFEM==1
-                        obj.fuselage_segments(i)=obj.fuselage_segments(i).compute_shell_coords(n,iNodes,obj.pathNodeCoords);
+                        nodeCoords = importdata(obj.pathNodeCoords);
+                        obj.fuselage_segments(i)=obj.fuselage_segments(i).compute_shell_coords(size(nodeCoords,1)-1,iNodes,obj.pathNodeCoords);
                     end
                 else
                     obj.fuselage_segments(i)=obj.fuselage_segments(i).compute_shell_coords();
@@ -362,10 +363,7 @@ classdef class_fuselage_geometry
                         end
                     end 
                 end
-            else
-                fprintf('Unknown Data Format');
-            end
-            if strcmp(xmlstruct.tag,'NACELLE')
+            elseif strcmp(xmlstruct.tag,'NACELLE')
                 obj.name=xmlstruct.attribs(1).value;
                 for i=1:length(xmlstruct.child)
                     if strcmp(xmlstruct.child(i).tag,'SEGMENT')
@@ -386,7 +384,7 @@ classdef class_fuselage_geometry
                     end 
                 end
             else
-                fprintf('Unknown Data Format');
+                fprintf('Unknown Data Format: %s \n', xmlstruct.tag);
             end
             
         end

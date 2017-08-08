@@ -44,7 +44,7 @@ A2control=A2(nR+1:nR+nE,nR+1+nE:nR+nE+nC);
 
 E=-0.5*aircraft.reference.S_ref*rho*(V^2)*A0elastic+Ks;
 D=-0.5*aircraft.reference.S_ref*rho*V*bb*A1elastic;
-A=-0.5*aircraft.reference.S_ref*rho*bb^2*A2elastic*0+Ms;
+A=-0.5*aircraft.reference.S_ref*rho*bb^2*A2elastic+Ms;
 Alag=0.5*aircraft.reference.S_ref*rho*V^2*Arest_elastic;
 
 Kar=0.5*aircraft.reference.S_ref*rho*(V^2)*A0rigid;

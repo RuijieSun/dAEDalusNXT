@@ -81,7 +81,9 @@ for i=1:length(wing_geo.wing_segments)
     for j=1:size(wing_geo.wing_segments(i).wingbox_coords,2)-1
         if wing_geo.isExternalFEM==0
             c=wing_geo.wing_segments(i).c_r*(1-span_loc_grid(j+1)*0.5-span_loc_grid(j)*0.5)+wing_geo.wing_segments(i).c_t*(span_loc_grid(j+1)*0.5+span_loc_grid(j)*0.5);
-            h=0.25*(wing_geo.wing_segments(i).wingbox_height(j,1)+wing_geo.wing_segments(i).wingbox_height(j,2)+wing_geo.wing_segments(i).wingbox_height(j+1,1)+wing_geo.wing_segments(i).wingbox_height(j+1,2));
+            h_fs = 0.5*(wing_geo.wing_segments(i).wingbox_height(j,1) + wing_geo.wing_segments(i).wingbox_height(j+1,1));
+            h_rs = 0.5*(wing_geo.wing_segments(i).wingbox_height(j,2) + wing_geo.wing_segments(i).wingbox_height(j+1,2));
+            h = 0.5*(h_fs + h_rs);
         end
       %  h=0.013;
         w=0.5*(norm(wing_geo.wing_segments(i).wingbox_coords(:,j,1)-wing_geo.wing_segments(i).wingbox_coords(:,j,2))+norm(wing_geo.wing_segments(i).wingbox_coords(:,j+1,1)-wing_geo.wing_segments(i).wingbox_coords(:,j+1,2)));
@@ -135,14 +137,14 @@ for i=1:length(wing_geo.wing_segments)
             V_wingbox=V_wingbox+h*w*le;
             S_wing=S_wing+0.8*(2*h+2*c)*le;
                 
-            wing_struct.beamelement(k).crosssection=wing_struct.beamelement(k).crosssection.setGeometry(c,h,w);%*cos(phi));
+            wing_struct.beamelement(k).crosssection=wing_struct.beamelement(k).crosssection.setGeometry(c,h_fs,h_rs,w);%*cos(phi));
         end
         if wing_geo.symmetric==1
             wing_struct.beamelement(k)=wing_struct.beamelement(k).setElementGeometry(le,-phi,-nu,twist);
         else
             wing_struct.beamelement(k)=wing_struct.beamelement(k).setElementGeometry(le,phi,nu,twist);
         end
-        
+        wing_struct.beamelement(k)=wing_struct.beamelement(k).f_calcCrossProp();
         k=k+1;
         %% todo calculate more accurate
        
@@ -160,11 +162,13 @@ if wing_geo.symmetric==1
         for j=1:size(wing_geo.wing_segments(i).wingbox_coords,2)-1
             if wing_geo.isExternalFEM==0
                 c=wing_geo.wing_segments(i).c_r*(1-span_loc_grid(j+1)*0.5-span_loc_grid(j)*0.5)+wing_geo.wing_segments(i).c_t*(span_loc_grid(j+1)*0.5+span_loc_grid(j)*0.5);
-                h=0.25*(wing_geo.wing_segments(i).wingbox_height(j,1)+wing_geo.wing_segments(i).wingbox_height(j,2)+wing_geo.wing_segments(i).wingbox_height(j+1,1)+wing_geo.wing_segments(i).wingbox_height(j+1,2));
+                h_fs = 0.5*(wing_geo.wing_segments(i).wingbox_height(j,1) + wing_geo.wing_segments(i).wingbox_height(j+1,1));
+                h_rs = 0.5*(wing_geo.wing_segments(i).wingbox_height(j,2) + wing_geo.wing_segments(i).wingbox_height(j+1,2));
+                h = 0.5*(h_fs + h_rs);
         %    h=0.013;
             end
             w=0.5*(norm(wing_geo.wing_segments(i).wingbox_coords(:,j,1)-wing_geo.wing_segments(i).wingbox_coords(:,j,2))+norm(wing_geo.wing_segments(i).wingbox_coords(:,j+1,1)-wing_geo.wing_segments(i).wingbox_coords(:,j+1,2)));
-            wing_struct.beamelement(k)=wing_struct.beamelement(k-1);
+            %wing_struct.beamelement(k)=wing_struct.beamelement(k-1);
             
             elem_vec=0.5*(wing_geo.wing_segments(i).wingbox_coords(:,j+1,1)+wing_geo.wing_segments(i).wingbox_coords(:,j+1,2))...
                 -0.5*(wing_geo.wing_segments(i).wingbox_coords(:,j,1)+wing_geo.wing_segments(i).wingbox_coords(:,j,2));
@@ -191,9 +195,10 @@ if wing_geo.symmetric==1
             if wing_geo.isExternalFEM==0
                 V_wingbox=V_wingbox+h*w*le;
                         
-                wing_struct.beamelement(k).crosssection=wing_struct.beamelement(k).crosssection.setGeometry(c,h,w);            
+                wing_struct.beamelement(k).crosssection=wing_struct.beamelement(k).crosssection.setGeometry(c,h_fs,h_rs,w);            
             end
             wing_struct.beamelement(k)=wing_struct.beamelement(k).setElementGeometry(le,phi,nu,twist);
+            wing_struct.beamelement(k)=wing_struct.beamelement(k).f_calcCrossProp();
             k=k+1;
             %% todo calculate more accurate
           
