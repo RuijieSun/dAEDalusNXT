@@ -20,6 +20,8 @@ classdef class_UVLM_solver
         reference;
         %> grid point coordinates
         grid;
+        %> grid point coordinates with flat grid  for area computation
+        grid_undef;
         %> panel edge indices of grid
         panels;
         %> panel area
@@ -136,7 +138,7 @@ classdef class_UVLM_solver
         qinf;
         r;
         r_mid;
-        r_dwn;
+        %r_dwn; %<- useless, also saved in colloc
         % vector with lever arms from colloc to hinge axis (inner hinge point)
         r_cs;
         % vector with lever arms from fvap to hinge axis (inner hinge point)
@@ -268,6 +270,8 @@ classdef class_UVLM_solver
         ssm
         csNames;
         gustZones;
+        % struct containing the points for cheb type distributions 
+        dataForCheb
     end
     
     methods
@@ -292,6 +296,7 @@ classdef class_UVLM_solver
                
                 name=aircraft.name;
                 grid=aircraft.grid_deflected;
+                grid_undef=aircraft.grid;
                 is_te=aircraft.is_te;
                 panels=aircraft.panels;
                 grid_wake=aircraft.grid_wake;
@@ -299,33 +304,58 @@ classdef class_UVLM_solver
                 reference=aircraft.reference;
                 obj.csNames={};
                 csPanelIds={};
+                csFractions={};
                 csHingePoints=[];
                 csHingeAxes=[];
                 iCs=0;
                 for iWing=1:length(aircraft.wings)
                     for iSeg=1:length(aircraft.wings(iWing).wing_segments)
-                         if aircraft.wings(iWing).wing_segments(iSeg).has_te_cs
+                        if aircraft.wings(iWing).wing_segments(iSeg).has_te_cs
                              
                             iCs=iCs+1;
                             obj.csNames{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).te_device.name];
                             csPanelIds{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).te_device.panelIds];
+                            csFractions{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).te_device.panelIds~=0];
+
                             csHingePoints=[csHingePoints; aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1); ];
                             csHingeAxes=[csHingeAxes; (aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1))/norm((aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1)));];
                             if and(aircraft.wings(iWing).wing_segments(iSeg).te_device.is_sym, aircraft.wings(iWing).symmetric)
                                 iCs=iCs+1;
                                 obj.csNames{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).te_device.name '_l'];
                                 csPanelIds{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).te_device.panelIdsL];
+                                csFractions{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).te_device.panelIdsL~=0];
                                 csHingePoints=[csHingePoints; [1 -1 1].*aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1); ];
                                 csHingeAxes=[csHingeAxes; [1 -1 1].*(aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1))/norm((aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1)));];
                             end
-                         end
+                        end
+                    end
+                    
+                    if ~isempty(aircraft.wings(iWing).parCS)
+                        for iParCs=1:length(aircraft.wings(iWing).parCS)
+                            iCs=iCs+1;
+                            obj.csNames{iCs}=aircraft.wings(iWing).parCS{iParCs}.name;
+                            csPanelIds{iCs}=[aircraft.wings(iWing).parCS{iParCs}.panelIds];
+                            csHingePoints=[csHingePoints; aircraft.wings(iWing).parCS{iParCs}.hingePoint'];
+                            csHingeAxes=[csHingeAxes; aircraft.wings(iWing).parCS{iParCs}.hingeAxis'];
+                            csFractions{iCs}=[aircraft.wings(iWing).parCS{iParCs}.fraction];
+                            if aircraft.wings(iWing).symmetric
+                                iCs=iCs+1;
+                                obj.csNames{iCs}=[aircraft.wings(iWing).parCS{iParCs}.name '_l'];
+                                csPanelIds{iCs}=[aircraft.wings(iWing).parCS{iParCs}.panelIdsL];
+                                csHingePoints=[csHingePoints;  [1 -1 1].*aircraft.wings(iWing).parCS{iParCs}.hingePoint'];
+                                csHingeAxes=[csHingeAxes;  [1 -1 1].*aircraft.wings(iWing).parCS{iParCs}.hingeAxis'];
+                                csFractions{iCs}=[aircraft.wings(iWing).parCS{iParCs}.fraction];
+                            end
+                        end
                     end
                 end
-                
                 obj.gustZones=aircraft.gustZones;
+                obj.dataForCheb=aircraft.dataForCheb;
+                
             elseif nargin==9    %< old style
                 name=varargin{1};
                 grid=varargin{2};
+                grid_undef=varargin{2};
                 is_te=varargin{3};
                 panels=varargin{4};
                 state=varargin{5};
@@ -340,6 +370,7 @@ classdef class_UVLM_solver
             elseif nargin==12 %< old style with control surfaces
                 name=varargin{1};
                 grid=varargin{2};
+                grid_undef=varargin{2};
                 is_te=varargin{3};
                 panels=varargin{4};
                 state=varargin{5};
@@ -365,6 +396,7 @@ classdef class_UVLM_solver
             % obj.Ma_corr=1;%sqrt(1-state.Ma^2);
             obj.state.p_ref=reference.p_ref;
             obj.grid=grid;
+            obj.grid_undef=grid_undef;
             obj.panels=panels;
             obj.is_te=is_te;
             obj.reference=reference;
@@ -381,7 +413,7 @@ classdef class_UVLM_solver
                 %from p_ref to 1/4
                 obj.r(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.75+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.25-obj.state.p_ref';
                 %from p_ref to 3/4
-                obj.r_dwn(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.25+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.75-obj.state.p_ref';
+                obj.colloc(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.25+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.75-obj.state.p_ref';
                 %from p_ref to 1/2
                 obj.r_mid(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.5+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.5-obj.state.p_ref';
             end
@@ -389,14 +421,27 @@ classdef class_UVLM_solver
             Rhat=zeros(length(obj.panels)*3,length(obj.panels)*3);
             obj.Khat=zeros(3*length(obj.panels),3*length(obj.panels),nCs);
             for iCs=1:nCs
-                obj.r_cs(:,csPanelIds{iCs},iCs)=obj.r_dwn(:,csPanelIds{iCs})-repmat((csHingePoints(iCs,:)'-obj.state.p_ref'),1,length(csPanelIds{iCs}));
+                % vectors from p_ref to colloc points of cs
+                obj.r_cs(:,csPanelIds{iCs},iCs)=obj.colloc(:,csPanelIds{iCs})-repmat((csHingePoints(iCs,:)'-obj.state.p_ref'),1,length(csPanelIds{iCs}));
+                % vectors from p_ref to 1/4 points of cs
                 obj.r_css(:,csPanelIds{iCs},iCs)=obj.r(:,csPanelIds{iCs})-repmat((csHingePoints(iCs,:)'-obj.state.p_ref'),1,length(csPanelIds{iCs}));
+                % transformation matrices for normal vector rotation around
+                % hinge axis
+                % size 3np*3np*cs, zeros for panels where no cs is placed
                 index=sort([(csPanelIds{iCs}-1)*3+1 (csPanelIds{iCs}-1)*3+2 (csPanelIds{iCs}-1)*3+3]);
-                obj.Khat(index,index,iCs)=kron(eye(length(csPanelIds{iCs})),[0 -csHingeAxes(iCs,3) csHingeAxes(iCs,2);csHingeAxes(iCs,3) 0 -csHingeAxes(iCs,1); -csHingeAxes(iCs,2) csHingeAxes(iCs,1) 0;]);
+                obj.Khat(index,index,iCs)=kron(diag(csFractions{iCs}),[0 -csHingeAxes(iCs,3) csHingeAxes(iCs,2);csHingeAxes(iCs,3) 0 -csHingeAxes(iCs,1); -csHingeAxes(iCs,2) csHingeAxes(iCs,1) 0;]);
+                %prepare current fractions
+                currFract=zeros(1,length(obj.panels));
+                currFract(csPanelIds{iCs})=csFractions{iCs};
+                
+                %add fractions 
                 for iPanel=1:length(obj.panels)
-                    Rhat((iPanel-1)*3+1:iPanel*3,(iPanel-1)*3+1:iPanel*3)=[0 -obj.r_cs(3,iPanel,iCs) obj.r_cs(2,iPanel,iCs);obj.r_cs(3,iPanel,iCs) 0 -obj.r_cs(1,iPanel,iCs);-obj.r_cs(2,iPanel,iCs) obj.r_cs(1,iPanel,iCs) 0;];
-                    RhatS((iPanel-1)*3+1:iPanel*3,(iPanel-1)*3+1:iPanel*3)=[0 -obj.r_css(3,iPanel,iCs) obj.r_css(2,iPanel,iCs);obj.r_css(3,iPanel,iCs) 0 -obj.r_css(1,iPanel,iCs);-obj.r_css(2,iPanel,iCs) obj.r_css(1,iPanel,iCs) 0;];
+                    Rhat((iPanel-1)*3+1:iPanel*3,(iPanel-1)*3+1:iPanel*3)=currFract(iPanel).*[0 -obj.r_cs(3,iPanel,iCs) obj.r_cs(2,iPanel,iCs);obj.r_cs(3,iPanel,iCs) 0 -obj.r_cs(1,iPanel,iCs);-obj.r_cs(2,iPanel,iCs) obj.r_cs(1,iPanel,iCs) 0;];
+                    RhatS((iPanel-1)*3+1:iPanel*3,(iPanel-1)*3+1:iPanel*3)=currFract(iPanel).*[0 -obj.r_css(3,iPanel,iCs) obj.r_css(2,iPanel,iCs);obj.r_css(3,iPanel,iCs) 0 -obj.r_css(1,iPanel,iCs);-obj.r_css(2,iPanel,iCs) obj.r_css(1,iPanel,iCs) 0;];
                 end
+                
+                % transformation matrices for hinge moment calculation 
+                % Fp -> hinge
                 obj.Rcs(iCs,:)=repmat(csHingeAxes(iCs,:),1,length(obj.panels))*Rhat;
                 obj.Rcss(iCs,:)=repmat(csHingeAxes(iCs,:),1,length(obj.panels))*RhatS;
             end
@@ -763,12 +808,12 @@ classdef class_UVLM_solver
             for i=1:length(obj.panels_wake)
                 if is_done(obj.panels_wake(3,i))==0
                     %obj.grid_wake(:,obj.panels_wake(3,i))=obj.grid_wake(:,obj.panels_wake(3,i))+[obj.Uinf(1)/obj.Ma_corr 0 0]'*obj.t_step*n_step;
-                    obj.grid_wake(:,obj.panels_wake(3,i))=obj.grid_wake(:,obj.panels_wake(3,i))+[obj.Uinf(1) 0 0]'*obj.t_step*n_step;
+                    obj.grid_wake(:,obj.panels_wake(3,i))=obj.grid_wake(:,obj.panels_wake(3,i))+obj.Uinf'*obj.t_step*n_step;
                     is_done(obj.panels_wake(3,i))=1;
                 end
                 if is_done(obj.panels_wake(4,i))==0
                     %obj.grid_wake(:,obj.panels_wake(4,i))=obj.grid_wake(:,obj.panels_wake(4,i))+[obj.Uinf(1)/obj.Ma_corr 0 0]'*obj.t_step*n_step;
-                    obj.grid_wake(:,obj.panels_wake(4,i))=obj.grid_wake(:,obj.panels_wake(4,i))+[obj.Uinf(1) 0 0]'*obj.t_step*n_step;
+                    obj.grid_wake(:,obj.panels_wake(4,i))=obj.grid_wake(:,obj.panels_wake(4,i))+obj.Uinf'*obj.t_step*n_step;
                     is_done(obj.panels_wake(4,i))=1;
                 end
             end
@@ -807,7 +852,31 @@ classdef class_UVLM_solver
 
                         
          test_wake=[];
-         fact=cumsum([0 0.25 ones(1,obj.settings.nFixedWakePanels) obj.settings.wakeGrowthFactor.^(1:n_step-2-obj.settings.nFixedWakePanels) obj.settings.wakeGrowthFactor.^(n_step+1-2-obj.settings.nFixedWakePanels)+ obj.settings.addLengthFactorLastPanel/obj.settings.wakelength_factor*n_step]/n_step);
+         %set the maximum wake length to 100*b_ref
+         %adjust wakeGrowthFactor so that the maximum length of the wake
+         %is 100*b_ref; if wakegrowthFactor turns out to be less then one,
+         %take one. The resulting wake will be longer than
+         %(100-addLengthFactorLastPanel)*b_ref
+         %determine the number of panels which grow exponentially
+         n_exp=n_step-1-obj.settings.nFixedWakePanels;
+         stop=1;
+         while stop
+             LexpTarget=100-obj.settings.addLengthFactorLastPanel-(obj.settings.wakelength_factor/n_step)*obj.settings.nFixedWakePanels;
+             LexpTrue=(obj.settings.wakeGrowthFactor^n_exp/(  obj.settings.wakeGrowthFactor - 1) - 1/(  obj.settings.wakeGrowthFactor - 1))*(obj.settings.wakelength_factor/n_step);
+             if LexpTrue>LexpTarget
+                 obj.settings.wakeGrowthFactor=obj.settings.wakeGrowthFactor-0.0001;
+                 if ~obj.settings.wakeGrowthFactor>1
+                     obj.settings.wakeGrowthFactor=1;
+                     stop=0;
+                 end
+             else
+                 stop=0;
+             end
+         end
+         fact=cumsum([0 0.25 ...
+             ones(1,obj.settings.nFixedWakePanels) ...
+             obj.settings.wakeGrowthFactor.^(1:n_step-2-obj.settings.nFixedWakePanels) ...
+             obj.settings.wakeGrowthFactor.^(n_step+1-2-obj.settings.nFixedWakePanels) + obj.settings.addLengthFactorLastPanel/obj.settings.wakelength_factor*n_step]/n_step);
             for i=0:1:n_step
                 for j=1:length(jump_idx_grid)-1
                     endrow=grid_wake(:,(jump_idx_grid(j)+(jump_idx_grid(j+1)-jump_idx_grid(j))/2+1):(jump_idx_grid(j)+(jump_idx_grid(j+1)-jump_idx_grid(j))));
@@ -950,7 +1019,6 @@ classdef class_UVLM_solver
             obj.grid(1,:)=obj.grid(1,:)*obj.Ma_corr;
             for i=1:length(obj.panels)
                 obj.r(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.75+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.25-obj.state.p_ref';
-                obj.r_dwn(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.25+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.75-obj.state.p_ref';
             end
             obj.grid(1,:)=obj.grid(1,:)/obj.Ma_corr;
             obj=obj.update_trailing_edge_line();
@@ -1073,8 +1141,8 @@ classdef class_UVLM_solver
         
         function obj=compute_panel_area(obj)
             for i=1:1:length(obj.panels)
-                r1=obj.grid(:,obj.panels(3,i))-obj.grid(:,obj.panels(1,i));
-                r2=obj.grid(:,obj.panels(4,i))-obj.grid(:,obj.panels(2,i));
+                r1=obj.grid_undef(:,obj.panels(3,i))-obj.grid_undef(:,obj.panels(1,i));
+                r2=obj.grid_undef(:,obj.panels(4,i))-obj.grid_undef(:,obj.panels(2,i));
                 r1xr2=[r1(2)*r2(3)-r1(3)*r2(2),r1(3)*r2(1)-r1(1)*r2(3),r1(1)*r2(2)-r1(2)*r2(1)];
                 obj.area(i)=0.5*norm(r1xr2);
             end
@@ -1509,7 +1577,12 @@ classdef class_UVLM_solver
 %                             obj.Aww_z=Aww_z/(4*pi);
           end
         
-        function obj=compute_influence_coeff_matrix(obj)
+        function obj=compute_influence_coeff_matrix(obj,varargin)
+            if nargin==2
+                 WWandBW=varargin{1};
+            else
+                WWandBW=1;
+            end
             n=length(obj.colloc);
             nw=size(obj.panels_wake,2);
             ng=size(obj.grid_wake,2);
@@ -1540,7 +1613,9 @@ classdef class_UVLM_solver
             %             obj.Abw=Cbw;
             
             Cwb=zeros(ng,n);
-            Cwb=compute_influence_vring_wake(obj.grid_vring,obj.panels,0,obj.grid_wake,0,0);
+            if WWandBW
+                Cwb=compute_influence_vring_wake(obj.grid_vring,obj.panels,0,obj.grid_wake,0,0);
+            end
             %Cwb=compute_influence_vring_wake_ff(obj.grid_vring,obj.panels,0,obj.grid_wake,0,0);
             obj.Awb=Cwb/(4*pi);
             
@@ -1550,7 +1625,9 @@ classdef class_UVLM_solver
             %             obj.Awb=Cwb;
             %
             Cww=zeros(ng,nw);
-            Cww=compute_influence_vring_wake(obj.grid_wake,obj.panels_wake,0,obj.grid_wake,0,0);
+            if WWandBW
+                Cww=compute_influence_vring_wake(obj.grid_wake,obj.panels_wake,0,obj.grid_wake,0,0);
+            end
             %Cww=compute_influence_vring_wake_ff(obj.grid_wake,obj.panels_wake,0,obj.grid_wake,0,0);
             % time_normal=toc
             obj.Aww=Cww/(4*pi);
@@ -4019,7 +4096,7 @@ classdef class_UVLM_solver
             obj.Uinf=a2bf(norm(obj.Uinf),alpha_0,obj.state.beta,obj.Ma_corr);
             obj=obj.f_solve();
             Cl_1=obj.Cl(end);  %Wrong coeffcient was defined (6 occurences). Cl_target is in wind frame. 
-            alpha_0=5;
+            alpha_0=1;
             obj.Uinf=a2bf(norm(obj.Uinf),alpha_0,obj.state.beta,obj.Ma_corr);
             obj=obj.f_solve();
             Cl_prev=obj.Cl(end);
@@ -4273,19 +4350,27 @@ classdef class_UVLM_solver
             end
         end
         
-        function obj=plot_uind(obj)
+        function obj=plot_uind(obj,varargin)
             for i=1:length(obj.panels)
                 handle= fill3(obj.grid(1,obj.panels(:,i)), obj.grid(2,obj.panels(:,i)),obj.grid(3,obj.panels(:,i)),0);
                 %  handle= fill3(obj.grid(1,obj.panels(:,i)), obj.grid(2,obj.panels(:,i)),obj.grid(3,obj.panels(:,i)),obj.Gamma(i));
                 hold on
             end
             axis equal
-            for i=1:length(obj.panels_wake)
-                uind=(obj.uind(obj.panels_wake(1,i))+obj.uind(obj.panels_wake(2,i))+obj.uind(obj.panels_wake(3,i))+obj.uind(obj.panels_wake(4,i)))/4;
-                handle= fill3(obj.grid_wake(1,obj.panels_wake(1:4,i)), obj.grid_wake(2,obj.panels_wake(1:4,i)),obj.grid_wake(3,obj.panels_wake(1:4,i)),uind);
-                %handle= fill3(obj.grid_wake(1,obj.panels_wake(1:4,i)), obj.grid_wake(2,obj.panels_wake(1:4,i)),obj.grid_wake(3,obj.panels_wake(1:4,i)),obj.Gamma_wake(i));
-                hold on
+            if isempty(varargin)
+                for i=1:length(obj.panels_wake)
+                    uind=(obj.uind(obj.panels_wake(1,i))+obj.uind(obj.panels_wake(2,i))+obj.uind(obj.panels_wake(3,i))+obj.uind(obj.panels_wake(4,i)))/4;
+                    handle= fill3(obj.grid_wake(1,obj.panels_wake(1:4,i)), obj.grid_wake(2,obj.panels_wake(1:4,i)),obj.grid_wake(3,obj.panels_wake(1:4,i)),uind);
+
+                    %handle= fill3(obj.grid_wake(1,obj.panels_wake(1:4,i)), obj.grid_wake(2,obj.panels_wake(1:4,i)),obj.grid_wake(3,obj.panels_wake(1:4,i)),obj.Gamma_wake(i));
+                    hold on
+                end
+            else
+                for i=1:length(varargin{1})
+                    handle= fill3(obj.grid_wake(1,obj.panels_wake(1:4,i)), obj.grid_wake(2,obj.panels_wake(1:4,i)),obj.grid_wake(3,obj.panels_wake(1:4,i)),varargin{1}(i),'LineStyle','none');
+                end
             end
+                
         end
         
         function obj=plot_L(obj)
@@ -4895,7 +4980,7 @@ classdef class_UVLM_solver
             %restore original grid
             obj=obj.initialize_unsteady_computation();
         end 
-        function obj=generateSSM(obj)
+        function obj=generateSSM(obj,aircraft)
             %this function generates the state space matrices for a
             %continuous time state space model
             %input vector is Vn and Vndot, (normal velocities on
@@ -4917,9 +5002,46 @@ classdef class_UVLM_solver
             %redo so that AIC is only computed once! saves 50% of the time
             %oO
             obj=obj.initialize_unsteady_computation_SSM();
-
+            %%
+%             obj=obj.removeWakeInteraction(aircraft);% <- this caused
+%             problems with the short period; it was better to avoid wakes
+%             which are to close to each other. a mm of distance is enough
             %% generate SSM with prepared solver instance
             obj.ssm=class_UVLM_SSM(obj);
+        end
+        function obj=removeWakeInteraction(obj,aircraft)
+            %this function removes the influence of wing wake intersections
+            %for all wings check if their wake intersects another wing
+            nWakeRow=obj.panel_len;
+            nWakeFlow=size(obj.panels_wake,2)/nWakeRow;
+            idxRow=0;
+            for iWake=1:length(aircraft.wings)
+                idxRow=idxRow(end)+1:idxRow(end)+sum(aircraft.wings(iWake).is_te);
+                allIdxWake=idxRow;
+                %gather all wake panels
+                for iRow=1:nWakeFlow-1
+                    allIdxWake=[allIdxWake idxRow+iRow*nWakeRow] ;
+                end
+                panelsWake=obj.panels_wake(:,allIdxWake);
+                gridWake=obj.grid_wake(:,panelsWake);
+                        
+                for iWing=1:length(aircraft.wings)
+                    if ~isequal(iWing,iWake)
+                        idxWingPanels=aircraft.wings(iWing).panel_start_idx:aircraft.wings(iWing).panel_start_idx-1+size(aircraft.wings(iWing).panels,2);
+                        gridWing=obj.grid(:,obj.panels(:,idxWingPanels));
+                        % get x y and z ranges of this wing
+                        minV=min(gridWing');
+                        maxV=max(gridWing');
+                        % extend by 10 percent
+                          minVe=minV-(maxV-minV)*0.1;
+                          maxVe=maxV+(maxV-minV)*0.1;
+                        %check for panels which have points in this vol
+                        idxInsideWakePanels=allIdxWake(any(reshape(sum(and(gridWake>minVe',gridWake<maxVe'))==3,4,length(allIdxWake))));
+                        %remove this influence in the Abw Matrix
+                         obj.Abw(idxWingPanels,idxInsideWakePanels)=0;
+                    end
+                end
+            end
         end
     end
     

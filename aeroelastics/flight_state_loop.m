@@ -42,8 +42,6 @@ for i=1:length(aircraft_structure.beam)
 end
 %run structures module
 for i=1:length(aircraft_structure.beam)
-    aircraft_structure.beam(i).update_M=1;
-    aircraft_structure.beam(i).update_K=1;
     aircraft_structure.beam(i).update_Q=1;
 end
 
@@ -116,8 +114,8 @@ while~converged
     end
     % solve beam to get new deflections
     for i=1:length(aircraft_structure.beam)
-        aircraft_structure.beam(i).update_M=1;
-        aircraft_structure.beam(i).update_K=1;
+%         aircraft_structure.beam(i).update_M=1;
+%         aircraft_structure.beam(i).update_K=1;
         aircraft_structure.beam(i).update_Q=1;
     end
     if aeroelastic_solver_settings.unrestrained
@@ -163,7 +161,7 @@ def=aircraft_structure.f_get_deflections;
 aircraft=aircraft.compute_deflected_grid(def);
 trim_ref=aircraft.reference;                    
 trim_ref.p_ref=state.aircraft_state.CG_ref;
-wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,state.aerodynamic_state,trim_ref);
+wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,state.aerodynamic_state,trim_ref, aircraft.control_surfaces_parents);
 wingaero=wingaero.f_solve_std();
 %      figure;
 %      wingaero.plot_cp;

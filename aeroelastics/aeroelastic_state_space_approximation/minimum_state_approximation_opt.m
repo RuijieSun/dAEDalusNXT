@@ -174,7 +174,7 @@ D(1:min(nL,nQ),1:min(nL,nQ))=eye(min(nL,nQ),min(nL,nQ));
                 plot(real(squeeze(Q(i,j,:))),imag(squeeze(Q(i,j,:))),'-rx');
                 
                 plot(Qtilde(:,1),Qtilde(:,2),'-b');
-                legend('Data','Rogers Approximation (N=6)')
+                legend('Data','Extended Minimum State Approximation')
             end
         end
     end

@@ -63,6 +63,14 @@ if strcmp(xmlstruct.child(1).tag,'DAEDALUS')
                             end
                             is_fueled=[is_fueled factor*str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(5).value)];
                             material{seg}= xml_aircraft.child(i).child(j).child(seg).child(wb).child(6).attribs.value;
+                            
+                            % saving extra properties related to layup.
+                            % Only executes if material is anisotropic
+%                             if strcmp(material{seg}, 'anisotropic')
+%                                ply_material{seg} = xml_aircraft.child(i).child(j).child(seg).child(wb).child(6).child(1).value;
+%                                layup_angles{seg} = str2double(strsplit(xml_aircraft.child(i).child(j).child(seg).child(wb).child(6).child(2).value,{',',' ',', '}));
+%                                layup_fractions{seg} = str2double(strsplit(xml_aircraft.child(i).child(j).child(seg).child(wb).child(6).child(3).value,{',',' ',', '}));
+%                             end
                         end
                     end
                 end
@@ -71,7 +79,38 @@ if strcmp(xmlstruct.child(1).tag,'DAEDALUS')
                 wings_structural_properties(j).rearspar=rearspar;
                 wings_structural_properties(j).is_fueled=is_fueled;
                 wings_structural_properties(j).material=material;
+                
+                % assigning layup properties of each wing-segment to its
+                % repspective properties within wings_structural_properties
+                % (of that segment)
+%                 for seg_check = length(wings_structural_properties(j).material)
+%                     
+%                     if strcmp(wings_structural_properties(j).material{seg_check}, 'anisotropic')
+%                         
+%                         wings_structural_properties(j).ply_material = ply_material;
+%                         wings_structural_properties(j).layup_angles = layup_angles;
+%                         wings_structural_properties(j).layup_fractions = layup_fractions;
+%                         
+%                     end
+%                     
+%                 end
             end
+            
+            % moving all parent control surfaces from wing objects to
+            % aircraft object
+            temp_array_wing = [];
+            
+            for counter_wing = 1:length(obj.wings)
+                
+                for counter = 1:length(obj.wings(counter_wing).control_surfaces)
+                    obj.wings(counter_wing).control_surfaces(counter).wing_index = counter_wing;
+                end
+                
+                temp_array_wing = [temp_array_wing, obj.wings(counter_wing).control_surfaces];
+            end
+            
+            obj.control_surfaces_parents=temp_array_wing;
+            
         end
         
         if strcmp(xml_aircraft.child(i).tag,'FUSELAGES')
@@ -183,7 +222,18 @@ if strcmp(xmlstruct.child(1).tag,'DAEDALUS')
                     case 'FUS_T_MIN_SK'
                         specialSettings.fusTminSK=str2num(xml_aircraft.child(i).child(j).value);
                     case 'FUS_T_MIN_SP'
-                        specialSettings.fusTminSP=str2num(xml_aircraft.child(i).child(j).value);
+                        specialSettings.fusTminSP=str2num(xml_aircraft.child(i).child(j).value);  
+                        
+                    % Properties used only when the material is anisotropic
+                    case 'SKINS_LAYUP'
+                        specialSettings.skins_ply_material = xml_aircraft.child(i).child(j).child(1).value;
+                        specialSettings.skins_layup_angles = str2double(strsplit(xml_aircraft.child(i).child(j).child(2).value,{',',' ',', '}));
+                        specialSettings.skins_layup_fractions = str2double(strsplit(xml_aircraft.child(i).child(j).child(3).value,{',',' ',', '}));
+                        
+                    case 'SPARS_LAYUP'
+                        specialSettings.spars_ply_material = xml_aircraft.child(i).child(j).child(1).value;
+                        specialSettings.spars_layup_angles = str2double(strsplit(xml_aircraft.child(i).child(j).child(2).value,{',',' ',', '}));
+                        specialSettings.spars_layup_fractions = str2double(strsplit(xml_aircraft.child(i).child(j).child(3).value,{',',' ',', '}));
                 end
                 obj.addSettings=specialSettings;
             end
@@ -205,36 +255,31 @@ end
 obj.wings_structural_properties=wings_structural_properties;
 k=1;
 for i=1:length(obj.wings)
-    for j=1:length(obj.wings(i).wing_segments)
-        if ~isempty(obj.wings(i).wing_segments(j).te_device)
+    
+    for j=1:length(obj.wings(i).control_surfaces)
+        
+        if obj.wings(i).control_surfaces(j).pos ~= 2
             
-            if(obj.wings(i).wing_segments(j).te_device.is_sym_defl==1)
-                obj.control_surfaces{k}=obj.wings(i).wing_segments(j).te_device.name;
-                obj.control_deflections{k}=obj.wings(i).wing_segments(j).te_device.delta;
+            if (obj.wings(i).control_surfaces(j).is_sym_defl==1)
+                
+                obj.control_surfaces{k}=obj.wings(i).control_surfaces(j).name;
+                obj.control_deflections{k}=obj.wings(i).control_surfaces(j).delta;
+                
             else
-                obj.control_surfaces{k}=[obj.wings(i).wing_segments(j).te_device.name '_left'];
-                obj.control_deflections{k}=obj.wings(i).wing_segments(j).te_device.delta;
+                obj.control_surfaces{k}=[obj.wings(i).control_surfaces(j).name '_left'];
+                obj.control_deflections{k}=obj.wings(i).control_surfaces(j).delta;
                 k=k+1;
-                obj.control_surfaces{k}=[obj.wings(i).wing_segments(j).te_device.name '_right'];
-                obj.control_deflections{k}=obj.wings(i).wing_segments(j).te_device.delta;
+                obj.control_surfaces{k}=[obj.wings(i).control_surfaces(j).name '_right'];
+                obj.control_deflections{k}=obj.wings(i).control_surfaces(j).delta;
             end
+            
             k=k+1;
-        end
-        if ~isempty(obj.wings(i).wing_segments(j).le_device)
-            if(obj.wings(i).wing_segments(j).le_device.is_sym_defl==1)
-                obj.control_surfaces{k}=obj.wings(i).wing_segments(j).le_device.name;
-                obj.control_deflections{k}=obj.wings(i).wing_segments(j).le_device.delta;
-            else
-                obj.control_surfaces{k}=[obj.wings(i).wing_segments(j).le_device.name '_left'];
-                obj.control_deflections{k}=obj.wings(i).wing_segments(j).le_device.delta;
-                k=k+1;
-                obj.control_surfaces{k}=[obj.wings(i).wing_segments(j).le_device.name '_right'];
-                obj.control_deflections{k}=obj.wings(i).wing_segments(j).le_device.delta;
-            end
-            k=k+1;
-        end
+            
+        end        
     end
 end
+        
+
 obj.control.trim_surface_idx=[];
 
 obj.control.lat_names=[];

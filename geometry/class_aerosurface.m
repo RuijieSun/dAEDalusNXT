@@ -110,6 +110,17 @@ classdef class_aerosurface
         panel_to_beam_element;
         
         grid_3D=1;
+
+        %array of control surface class instance
+        control_surfaces;
+        geom_arr;
+        curr_geom_cell;
+        curr_etas_cell;
+        final_geom_cell;
+        final_etas_cell;
+        etas_cuts;
+        % parametric , wing spanning control surfaces
+        parCS
     end
     
     methods (Static)
@@ -161,245 +172,386 @@ classdef class_aerosurface
             obj.wings_structural_properties.rearspar = [];
             obj.wings_structural_properties.is_fueled = [];
             obj.wings_structural_properties.material = {};
-            if n_compSegments ~= 0
-                % loop over all component segments
-                for i = 1:n_compSegments
-                    compSegUID = tiglWingGetComponentSegmentUID(tigl, wingIndex, i);
-                    x_compSeg = tixiUIDGetXPath(tixi, compSegUID);
-                    n_segs_in_compSeg = tiglWingComponentSegmentGetNumberOfSegments(tigl, compSegUID);
-                    
-                    % check if a structure is defined for this segment
-                    if tixiGetNamedChildrenCount(tixi, x_compSeg, 'structure')
-                        x_struct = [x_compSeg, '/structure'];
-                    
-                        % check if there are spars for this segment
-                        if tixiGetNamedChildrenCount(tixi, x_struct, 'spars')
-                            x_spSegs = [x_struct, '/spars/sparSegments'];
-                            n_spSegs = tixiGetNamedChildrenCount(tixi, x_spSegs, 'sparSegment');
-                            
-                            segmentUIDs = cell(1, n_segs_in_compSeg);
-                            innerElemUIDs = cell(1, n_segs_in_compSeg);
-                            outerElemUIDs = cell(1, n_segs_in_compSeg);
-                            sectionEtas = nan(2*(n_segs_in_compSeg + 1), 1);
-                            segmentIndices = zeros(1, n_segs_in_compSeg);
-                            for j = 1:n_segs_in_compSeg
-                                segmentUIDs{j} = tiglWingComponentSegmentGetSegmentUID(tigl, compSegUID, j);
-                                [segmentIndices(j), wingIndex] = tiglWingGetSegmentIndex(tigl, segmentUIDs{j});
+            
+            % Saves original amount of segments, before daedalus starts
+            % adding them. Used later on
+            obj.geom_arr = ones(1,length(obj.wing_segments));
+            
+            % initializes array which will be later use to store segment
+            % indices without losing info when the for loop below changes
+            % cycle
+            segmentIndices_updated = [];
+            
+            % loop over all component segments
+            for i = 1:n_compSegments
+                compSegUID = tiglWingGetComponentSegmentUID(tigl, wingIndex, i);
+                x_compSeg = tixiUIDGetXPath(tixi, compSegUID);
+                n_segs_in_compSeg = tiglWingComponentSegmentGetNumberOfSegments(tigl, compSegUID);
 
-                                [~, innerElemUIDs{j}] = tiglWingGetInnerSectionAndElementUID(tigl, wingIndex, segmentIndices(j));
-                                [~, outerElemUIDs{j}] = tiglWingGetOuterSectionAndElementUID(tigl, wingIndex, segmentIndices(j));
-                                [eta_inner, ~] = tiglWingSegmentPointGetComponentSegmentEtaXsi(tigl, segmentUIDs{j}, compSegUID, 0, 0);  
-                                [eta_outer, ~] = tiglWingSegmentPointGetComponentSegmentEtaXsi(tigl, segmentUIDs{j}, compSegUID, 1, 0);
-                                
-                                sectionEtas(2*j - 1) = eta_inner;
-                                sectionEtas(2*j - 0) = eta_outer;
-                            end
-                            sectionEtas = unique(sectionEtas(~isnan(sectionEtas)));
-                            
-                            % spSegs will encode 2 point spar segments in its rows
-                            % as follows: [eta_1, xsi_1, eta_2, xsi_2, t_web, t_top, t_bottom]
-                            spSegs = zeros(0, 7);
-                            points = zeros(0, 2);
+                % check if a structure is defined for this segment
+                if tixiGetNamedChildrenCount(tixi, x_compSeg, 'structure')
+                    x_struct = [x_compSeg, '/structure'];
 
-                            for j = 1:n_spSegs
-                                x_spSeg = sprintf('%s/sparSegment[%i]', x_spSegs, j);
-                                n_spPos = tixiGetNamedChildrenCount(tixi, [x_spSeg, '/sparPositionUIDs'], 'sparPositionUID');
+                    % check if there are spars for this segment
+                    if tixiGetNamedChildrenCount(tixi, x_struct, 'spars')
+                        x_spSegs = [x_struct, '/spars/sparSegments'];
+                        n_spSegs = tixiGetNamedChildrenCount(tixi, x_spSegs, 'sparSegment');
 
-                                pos_ = zeros(n_spPos, 2);
-                                % loop over all positions and store in pos array
-                                for k = 1:n_spPos
-                                    x_spPosUID = sprintf('%s/sparPositionUIDs/sparPositionUID[%i]', x_spSeg, k);
-                                    spPosUID = tixiGetTextElement(tixi, x_spPosUID);
-                                    x_spPos = tixiUIDGetXPath(tixi, spPosUID);
+                        segmentUIDs = cell(1, n_segs_in_compSeg);
+                        innerElemUIDs = cell(1, n_segs_in_compSeg);
+                        outerElemUIDs = cell(1, n_segs_in_compSeg);
+                        sectionEtas = nan(2*(n_segs_in_compSeg + 1), 1);
+                        segmentIndices = zeros(1, n_segs_in_compSeg);
+                        
 
-                                    xsi = tixiGetDoubleElement(tixi, [x_spPos, '/xsi']);
-                                    
-                                    % Obtaining the eta is a little more
-                                    % complicated
-                                    if tixiGetNamedChildrenCount(tixi, x_spPos, 'eta') == 0
-                                        elemUID = tixiGetTextElement(tixi, [x_spPos, '/elementUID']);
-                                        
-                                        index = find(strcmp(innerElemUIDs, elemUID));
-                                        if ~isempty(index)
-                                            eta = 0;
-                                        else
-                                            index = find(strcmp(outerElemUIDs, elemUID));
-                                            eta = 1;
-                                        end
-                                            
-                                        [eta, ~] = tiglWingSegmentPointGetComponentSegmentEtaXsi(tigl, segmentUIDs{index}, compSegUID, eta, xsi);
-                                        [~, id_sec] = min(abs(sectionEtas - eta));
-                                        eta = sectionEtas(id_sec);
-                                    else
-                                        eta = tixiGetDoubleElement(tixi, [x_spPos, '/eta']);
-                                        d_eta = abs(sectionEtas - eta);
-                                        id_sec = find(round(d_eta, 2) == 0);
-                                        if ~isempty(id_sec)
-                                            warning('A spar was positioned very close to a section (eta difference = %.6f). Spar will be put exactly at this section.', d_eta);
-                                            eta = sectionEtas(id_sec(1));
-                                        end
-                                    end
-                                    
-                                    point = [eta, xsi];
-                                    pos_(k, :) = point;
-                                    points = [points; point];
-                                end
-                                
-                                ts = ones(1,3);            
-                                % Obtain the thicknesses of the wingbox
-                                x_spCS = [x_spSeg, '/sparCrossSection'];
-                                if tixiCheckElement(tixi, x_spCS)
-                                    x_t_web = [x_spCS, '/web1/material/thickness'];
-                                    if tixiCheckElement(tixi, x_t_web)
-                                        ts(1) = tixiGetDoubleElement(tixi, x_t_web);
-                                    end
 
-                                    x_t_top = [x_spCS, '/upperCap/material/thickness'];
-                                    if tixiCheckElement(tixi, x_t_top)
-                                        ts(2) =  tixiGetDoubleElement(tixi, x_t_top);
-                                    end
+                        for j = 1:n_segs_in_compSeg
+                            segmentUIDs{j} = tiglWingComponentSegmentGetSegmentUID(tigl, compSegUID, j);
+                            [segmentIndices(j), wingIndex] = tiglWingGetSegmentIndex(tigl, segmentUIDs{j});
 
-                                    x_t_bot = [x_spCS, '/lowerCap/material/thickness'];
-                                    if tixiCheckElement(tixi, x_t_bot)
-                                        ts(3) = tixiGetDoubleElement(tixi, x_t_bot);
-                                    end
-                                end
-                                
-                                pos = [pos_(1:end-1, :), pos_(2:end, :)];
-                                spSeg = [pos, repmat(ts, size(pos, 1), 1)];
-                                spSegs = [spSegs; spSeg];
-                            end
-                            
-                            % To construct front and rear spars we loop
-                            % over all points and find the most forward and
-                            % aft points at their eta. The most forward
-                            % point becomes a node in the front spar, the
-                            % most aft becomes a node in the rear spar. At
-                            % these nodes we note the eta, xsi, and the
-                            % thicknesses of the corresponding segment. We
-                            % store these nodes in two matrices, one for
-                            % the front and another for the rear spar.
-                            % These matrices will be have size N x 5 such
-                            % that their rows are:
-                            % [eta, xsi, t_web, t_top, t_bottom]
-                            
-                            % We should present the user with a warning if
-                            % there are more than 2 points on a line,
-                            % because this means we are removing one or
-                            % possibly more middle spars.
-                            
-                            % Furthermore, we should check for each node of
-                            % the newly constructed front and rear spars if
-                            % it lies on a boundary between two wing
-                            % segments. If it doesn't we should split the
-                            % wing segment at this node.
-                            
-                            etas = unique(points(:, 1));
-                            n_points = size(etas, 1);
-                            
-                            nodes_fs_ = zeros(n_points, 5);
-                            nodes_fs_(:, 1) = etas;
-                            nodes_rs_ = nodes_fs_;
-                            
-                            % We do this loop in reverse to aid the process
-                            % of splitting segments.
-                            for j = n_points:-1:1
-                                % Only consider the spar segments that
-                                % start at, end at, or cross the eta of
-                                % the current point.
-                                segs_ = spSegs(spSegs(:, 1) <= etas(j) & spSegs(:, 3) >= etas(j), :);
-                                
-                                % Calculate the xsi values at the locations
-                                % at which a vertical line through the
-                                % current eta intersects each of the
-                                % segments under consideration.
-                                xsis = segs_(:, 2) + (segs_(:, 4) - segs_(:, 2))./(segs_(:, 3) - segs_(:, 1)).*(etas(j) - segs_(:, 1));
-                                
-                                % Check if there are more than 2 spar
-                                % segments that cross this eta. Give a
-                                % warning to let the user know we are
-                                % removing these segments here.
-                                if length(xsis) > 2
-                                    warning('There are more than two spars specified at a spanwise location. Only the most forward and aft will be kept.');
-                                end
-                                
-                                % The minimum xsi in this vector
-                                % corresponds to the front, and the maximum
-                                % to the rear spar.
-                                [nodes_fs_(j, 2), id_fs] = min(xsis);
-                                [nodes_rs_(j, 2), id_rs] = max(xsis);
-                                
-                                % Then, store the thicknesses of the
-                                % corresponding spar segments alongside the
-                                % new nodes.
-                                nodes_fs_(j, 3:end) = segs_(id_fs, 5:end);
-                                nodes_rs_(j, 3:end) = segs_(id_rs, 5:end);
-                                
-                                % Finally, check if this node lies
-                                % precisely on the boundary between two
-                                % wing segments. If it doesn't, split the
-                                % corresponding wing segment at this node.
-                                if all(etas(j) ~= sectionEtas)
-                                    % First get the id of the segment we're
-                                    % gonna split.
-                                    seg_num = find(etas(j) < sectionEtas, 1) - 1;
-                                    seg_id = segmentIndices(seg_num);
-                                    
-                                    % Now we need to find the eta of the
-                                    % split w.r.t. the segment.
-                                    inner_section_eta = sectionEtas(seg_num);
-                                    outer_section_eta = sectionEtas(seg_num + 1);                          
-                                    eta_seg = (etas(j) - inner_section_eta)/(outer_section_eta - inner_section_eta);
-                                    
-                                    % Then we can split the segment there
-                                    % and add the current node eta to the
-                                    % list of section etas.
-                                    obj = obj.split_segment(seg_id, eta_seg, 1);
-                                    sectionEtas = [sectionEtas(1:seg_num); etas(j); sectionEtas((seg_num+1):end)];
-                                    n_segs_in_compSeg = n_segs_in_compSeg + 1;
-                                    n_segments = n_segments + 1;
-                                    segmentIndices = [segmentIndices(1:seg_num), segmentIndices(seg_num:end)+1];
-                                end
-                            end
-                            
-                            % Now we need to make sure that there are spar
-                            % positions at each section. 
-                            nodes_fs = zeros(n_segs_in_compSeg + 1, 5);
-                            nodes_fs(2:end-1, 1) = sectionEtas(2:end-1);
-                            nodes_fs(end, 1) = 1;
-                            nodes_rs = nodes_fs;
-                            for j = 1:4
-                                nodes_fs(:, j+1) = interp1(nodes_fs_(:, 1), nodes_fs_(:, j+1), nodes_fs(:, 1), 'linear', 'extrap');
-                                nodes_rs(:, j+1) = interp1(nodes_rs_(:, 1), nodes_rs_(:, j+1), nodes_rs(:, 1), 'linear', 'extrap');
-                            end
-                            
-                            % Now we have to turn the lists of nodes back
-                            % into lists of spar segments with two end
-                            % points.
-                            fs_segments = [nodes_fs(1:end-1, 1:2), nodes_fs(2:end, 1:2), (nodes_fs(1:end-1, 3:end) + nodes_fs(2:end, 3:end))/2];
-                            rs_segments = [nodes_rs(1:end-1, 1:2), nodes_rs(2:end, 1:2), (nodes_rs(1:end-1, 3:end) + nodes_rs(2:end, 3:end))/2];
-                            
-                            % Finally, we can store the segments where they
-                            % belong.
-                            for j = 1:n_segs_in_compSeg
-                                obj.wing_segments(segmentIndices(j)).structural_properties.fs_segments = fs_segments(j, [2, 4:end]);
-                                obj.wing_segments(segmentIndices(j)).structural_properties.rs_segments = rs_segments(j, [2, 4:end]);
-                            end
-                                
-                            obj.wings_structural_properties.fs_segments = [obj.wings_structural_properties.fs_segments; fs_segments];
-                            obj.wings_structural_properties.rs_segments = [obj.wings_structural_properties.rs_segments; rs_segments];
+                            [~, innerElemUIDs{j}] = tiglWingGetInnerSectionAndElementUID(tigl, wingIndex, segmentIndices(j));
+                            [~, outerElemUIDs{j}] = tiglWingGetOuterSectionAndElementUID(tigl, wingIndex, segmentIndices(j));
+                            [eta_inner, ~] = tiglWingSegmentPointGetComponentSegmentEtaXsi(tigl, segmentUIDs{j}, compSegUID, 0, 0);  
+                            [eta_outer, ~] = tiglWingSegmentPointGetComponentSegmentEtaXsi(tigl, segmentUIDs{j}, compSegUID, 1, 0);
 
-                            obj.wings_structural_properties.frontspar = [obj.wings_structural_properties.frontspar, nodes_fs(:, 2)'];
-                            obj.wings_structural_properties.rearspar = [obj.wings_structural_properties.rearspar, nodes_rs(:, 2)'];
+                            sectionEtas(2*j - 1) = eta_inner;
+                            sectionEtas(2*j - 0) = eta_outer;
                         end
+                        
+                        % If this is the first time the loop is running
+                        % (only 1 component segment) then
+                        % segmentIndices_updated is set equal to
+                        % segmentIndices, as there cannot have been any
+                        % loss of info yet due to the for loop advancing 1
+                        % cycle
+                        if isempty(segmentIndices_updated) == 1
+                            segmentIndices_updated = segmentIndices;
+                            prev_index = 0;
+                            
+                        % If this is not the 1st time the loop is running,
+                        % segmentIndices is not up to date anymore, hence segmentIndices_updated
+                        % references itself
+                        else
+                            prev_index = segmentIndices_updated(end);
+                            segmentIndices_updated = 1:1:segmentIndices_updated(end)+n_segs_in_compSeg;
+                        end
+                        
+                        
+                        sectionEtas = unique(sectionEtas(~isnan(sectionEtas)));
+
+                        % spSegs will encode 2 point spar segments in its rows
+                        % as follows: [eta_1, xsi_1, eta_2, xsi_2, t_web, t_top, t_bottom]
+                        spSegs = zeros(0, 7);
+                        points = zeros(0, 2);
+
+                        for j = 1:n_spSegs
+                            x_spSeg = sprintf('%s/sparSegment[%i]', x_spSegs, j);
+                            n_spPos = tixiGetNamedChildrenCount(tixi, [x_spSeg, '/sparPositionUIDs'], 'sparPositionUID');
+
+                            pos_ = zeros(n_spPos, 2);
+                            % loop over all positions and store in pos array
+                            for k = 1:n_spPos
+                                x_spPosUID = sprintf('%s/sparPositionUIDs/sparPositionUID[%i]', x_spSeg, k);
+                                spPosUID = tixiGetTextElement(tixi, x_spPosUID);
+                                x_spPos = tixiUIDGetXPath(tixi, spPosUID);
+
+                                xsi = tixiGetDoubleElement(tixi, [x_spPos, '/xsi']);
+
+                                % Obtaining the eta is a little more
+                                % complicated
+                                if tixiGetNamedChildrenCount(tixi, x_spPos, 'eta') == 0
+                                    elemUID = tixiGetTextElement(tixi, [x_spPos, '/elementUID']);
+
+                                    index = find(strcmp(innerElemUIDs, elemUID));
+                                    if ~isempty(index)
+                                        eta = 0;
+                                    else
+                                        index = find(strcmp(outerElemUIDs, elemUID));
+                                        eta = 1;
+                                    end
+
+                                    [eta, ~] = tiglWingSegmentPointGetComponentSegmentEtaXsi(tigl, segmentUIDs{index}, compSegUID, eta, xsi);
+                                    [~, id_sec] = min(abs(sectionEtas - eta));
+                                    eta = sectionEtas(id_sec);
+                                else
+                                    eta = tixiGetDoubleElement(tixi, [x_spPos, '/eta']);
+                                    d_eta = abs(sectionEtas - eta);
+                                    id_sec = find(round(d_eta, 2) == 0);
+                                    if ~isempty(id_sec)
+                                        warning('A spar was positioned very close to a section (eta difference = %.6f). Spar will be put exactly at this section.', d_eta);
+                                        eta = sectionEtas(id_sec(1));
+                                    end
+                                end
+
+                                point = [eta, xsi];
+                                pos_(k, :) = point;
+                                points = [points; point];
+                            end
+
+                            ts = ones(1,3);            
+                            % Obtain the thicknesses of the wingbox
+                            x_spCS = [x_spSeg, '/sparCrossSection'];
+                            if tixiCheckElement(tixi, x_spCS)
+                                x_t_web = [x_spCS, '/web1/material/thickness'];
+                                if tixiCheckElement(tixi, x_t_web)
+                                    ts(1) = tixiGetDoubleElement(tixi, x_t_web);
+                                end
+
+                                x_t_top = [x_spCS, '/upperCap/material/thickness'];
+                                if tixiCheckElement(tixi, x_t_top)
+                                    ts(2) =  tixiGetDoubleElement(tixi, x_t_top);
+                                end
+
+                                x_t_bot = [x_spCS, '/lowerCap/material/thickness'];
+                                if tixiCheckElement(tixi, x_t_bot)
+                                    ts(3) = tixiGetDoubleElement(tixi, x_t_bot);
+                                end
+                            end
+
+                            pos = [pos_(1:end-1, :), pos_(2:end, :)];
+                            spSeg = [pos, repmat(ts, size(pos, 1), 1)];
+                            spSegs = [spSegs; spSeg];
+                        end
+
+                        % To construct front and rear spars we loop
+                        % over all points and find the most forward and
+                        % aft points at their eta. The most forward
+                        % point becomes a node in the front spar, the
+                        % most aft becomes a node in the rear spar. At
+                        % these nodes we note the eta, xsi, and the
+                        % thicknesses of the corresponding segment. We
+                        % store these nodes in two matrices, one for
+                        % the front and another for the rear spar.
+                        % These matrices will be have size N x 5 such
+                        % that their rows are:
+                        % [eta, xsi, t_web, t_top, t_bottom]
+
+                        % We should present the user with a warning if
+                        % there are more than 2 points on a line,
+                        % because this means we are removing one or
+                        % possibly more middle spars.
+
+                        % Furthermore, we should check for each node of
+                        % the newly constructed front and rear spars if
+                        % it lies on a boundary between two wing
+                        % segments. If it doesn't we should split the
+                        % wing segment at this node.
+
+                        etas = unique(points(:, 1));
+                        n_points = size(etas, 1);
+
+                        nodes_fs_ = zeros(n_points, 5);
+                        nodes_fs_(:, 1) = etas;
+                        nodes_rs_ = nodes_fs_;
+
+                        % We do this loop in reverse to aid the process
+                        % of splitting segments.
+                        for j = n_points:-1:1
+                            % Only consider the spar segments that
+                            % start at, end at, or cross the eta of
+                            % the current point.
+                            segs_ = spSegs(spSegs(:, 1) <= etas(j) & spSegs(:, 3) >= etas(j), :);
+
+                            % Calculate the xsi values at the locations
+                            % at which a vertical line through the
+                            % current eta intersects each of the
+                            % segments under consideration.
+                            xsis = segs_(:, 2) + (segs_(:, 4) - segs_(:, 2))./(segs_(:, 3) - segs_(:, 1)).*(etas(j) - segs_(:, 1));
+
+                            % Check if there are more than 2 spar
+                            % segments that cross this eta. Give a
+                            % warning to let the user know we are
+                            % removing these segments here.
+                            if length(xsis) > 2
+                                warning('There are more than two spars specified at a spanwise location. Only the most forward and aft will be kept.');
+                            end
+
+                            % The minimum xsi in this vector
+                            % corresponds to the front, and the maximum
+                            % to the rear spar.
+                            [nodes_fs_(j, 2), id_fs] = min(xsis);
+                            [nodes_rs_(j, 2), id_rs] = max(xsis);
+
+                            % Then, store the thicknesses of the
+                            % corresponding spar segments alongside the
+                            % new nodes.
+                            nodes_fs_(j, 3:end) = segs_(id_fs, 5:end);
+                            nodes_rs_(j, 3:end) = segs_(id_rs, 5:end);
+
+                            % Finally, check if this node lies
+                            % precisely on the boundary between two
+                            % wing segments. If it doesn't, split the
+                            % corresponding wing segment at this node.
+                            if all(etas(j) ~= sectionEtas)
+                                % First get the id of the segment we're
+                                % gonna split.
+                                seg_num = find(etas(j) < sectionEtas, 1) - 1;
+                                seg_id = segmentIndices_updated(seg_num);
+
+                                % Now we need to find the eta of the
+                                % split w.r.t. the segment.
+                                inner_section_eta = sectionEtas(seg_num);
+                                outer_section_eta = sectionEtas(seg_num + 1);                          
+                                eta_seg = (etas(j) - inner_section_eta)/(outer_section_eta - inner_section_eta);
+
+                                % Then we can split the segment there
+                                % and add the current node eta to the
+                                % list of section etas.
+                                obj = obj.split_segment(seg_id, eta_seg, 1);
+                                sectionEtas = [sectionEtas(1:seg_num); etas(j); sectionEtas((seg_num+1):end)];
+                                n_segs_in_compSeg = n_segs_in_compSeg + 1;
+                                n_segments = n_segments + 1;
+                                segmentIndices_updated = [segmentIndices_updated,segmentIndices_updated(end) + 1];
+                                segmentIndices = [segmentIndices(1:seg_num), segmentIndices(seg_num:end)+1];
+                            end
+                        end
+
+                        % Now we need to make sure that there are spar
+                        % positions at each section. 
+                        nodes_fs = zeros(n_segs_in_compSeg + 1, 5);
+                        nodes_fs(2:end-1, 1) = sectionEtas(2:end-1);
+                        nodes_fs(end, 1) = 1;
+                        nodes_rs = nodes_fs;
+                        for j = 1:4
+                            nodes_fs(:, j+1) = interp1(nodes_fs_(:, 1), nodes_fs_(:, j+1), nodes_fs(:, 1), 'linear', 'extrap');
+                            nodes_rs(:, j+1) = interp1(nodes_rs_(:, 1), nodes_rs_(:, j+1), nodes_rs(:, 1), 'linear', 'extrap');
+                        end
+
+                        % Now we have to turn the lists of nodes back
+                        % into lists of spar segments with two end
+                        % points.
+                        fs_segments = [nodes_fs(1:end-1, 1:2), nodes_fs(2:end, 1:2), (nodes_fs(1:end-1, 3:end) + nodes_fs(2:end, 3:end))/2];
+                        rs_segments = [nodes_rs(1:end-1, 1:2), nodes_rs(2:end, 1:2), (nodes_rs(1:end-1, 3:end) + nodes_rs(2:end, 3:end))/2];
+
+                        % Finally, we can store the segments where they
+                        % belong.
+                        for j = 1:n_segs_in_compSeg
+                            obj.wing_segments(segmentIndices_updated(j+prev_index)).structural_properties.fs_segments = fs_segments(j, [2, 4:end]);
+                            obj.wing_segments(segmentIndices_updated(j+prev_index)).structural_properties.rs_segments = rs_segments(j, [2, 4:end]);
+                        end
+                        
+                        % Note that prev_index is used above in order to give
+                        % the correct starting index in case the for loop
+                        % is at its 2nd or higher cycle
+
+                        obj.wings_structural_properties.fs_segments = [obj.wings_structural_properties.fs_segments; fs_segments];
+                        obj.wings_structural_properties.rs_segments = [obj.wings_structural_properties.rs_segments; rs_segments];
+
+                        obj.wings_structural_properties.frontspar = [obj.wings_structural_properties.frontspar, nodes_fs(:, 2)'];
+                        obj.wings_structural_properties.rearspar = [obj.wings_structural_properties.rearspar, nodes_rs(:, 2)'];
                     end
                 end
+            end        
+
+            % loop over all component segments
+            control_counter = 1;
+            for i = 1:n_compSegments
                 
-                % For now aluminum is always used as the material for the
-                % wingbox and the wingbox is always fueled.
-                obj.wings_structural_properties.is_fueled = ones(1, n_segments);
-                obj.wings_structural_properties.material = repmat({'aluminum'}, 1, n_segments);
+                % Set component segment UID and xml path
+                compSegUID = tiglWingGetComponentSegmentUID(tigl, wingIndex, i);
+                x_compSeg = tixiUIDGetXPath(tixi, compSegUID);
+
+                % checks if control surfaces are defined within this segment. If yes, saves X-path
+                if tixiGetNamedChildrenCount(tixi, x_compSeg, 'controlSurfaces') ~= 0
+                    x_CS = [x_compSeg, '/controlSurfaces'];
+
+
+                    % checks if trailing edge control surfaces exist. If yes, saves X-path
+                    if tixiGetNamedChildrenCount(tixi, x_CS, 'trailingEdgeDevices') ~= 0
+                        x_CS_TE = [x_CS, '/trailingEdgeDevices'];
+
+                        % checks how many TE_CS there are
+                        nr_CS_TE = tixiGetNamedChildrenCount(tixi, x_CS_TE, 'trailingEdgeDevice');
+
+                        % loop over every single TE_CS within TE_CS block
+                        for CS_TE_index = 1:nr_CS_TE
+
+                            %writes temp xpath to single TE_CS
+                            string_in = ['/trailingEdgeDevice[',num2str(CS_TE_index),']'];
+                            x_CS_TE_temp = [x_CS_TE,string_in ];
+
+                            %creates CS instance in CS class (pos=0 since TE)
+                            control_surfaces_temp = class_control_surface_parent.create_from_cpacs(tixi,tigl,x_CS_TE_temp,0);
+                            control_surfaces(control_counter) = control_surfaces_temp;
+                            control_counter = control_counter + 1;
+                        end  
+                    end
+
+
+                    % checks if leading edge control surfaces exist. If yes, saves X-path
+                    if tixiGetNamedChildrenCount(tixi, x_CS, 'leadingEdgeDevices') ~= 0
+                        x_CS_LE = [x_CS, '/leadingEdgeDevices'];
+
+                        % checks how many LE_CS there are
+                        nr_CS_LE = tixiGetNamedChildrenCount(tixi, x_CS_LE, 'leadingEdgeDevice');
+
+                        % loop over every single LE_CS within LE_CS block
+                        for CS_LE_index = 1:nr_CS_LE
+
+                            %writes temp xpath to single LE_CS
+                            string_in = ['/leadingEdgeDevice[',num2str(CS_LE_index),']'];
+                            x_CS_LE_temp = [x_CS_LE,string_in];
+
+                            %creates CS instance in CS class (pos=1 since LE)
+                            control_surfaces_temp = class_control_surface_parent.create_from_cpacs(tixi,tigl,x_CS_LE_temp,1);
+                            control_surfaces(control_counter) = control_surfaces_temp;
+                            control_counter = control_counter + 1;
+
+                        end 
+                    end
+                    
+                    
+                    % checks if spoiler control surfaces exist. If yes, saves X-path
+                    if tixiGetNamedChildrenCount(tixi, x_CS, 'spoilers') ~= 0
+                        x_CS_SP = [x_CS, '/spoilers'];
+
+                        % checks how many TE_CS there are
+                        nr_CS_SP = tixiGetNamedChildrenCount(tixi, x_CS_SP, 'spoiler');
+
+                        % loop over every single TE_CS within TE_CS block
+                        for CS_SP_index = 1:nr_CS_SP
+
+                            %writes temp xpath to single TE_CS
+                            string_in = ['/spoiler[',num2str(CS_SP_index),']'];
+                            x_CS_SP_temp = [x_CS_SP,string_in ];
+
+                            %creates CS instance in CS class (pos=0 since TE)
+                            control_surfaces_temp = class_control_surface_parent.create_from_cpacs(tixi,tigl,x_CS_SP_temp,2);
+                            control_surfaces(control_counter) = control_surfaces_temp;
+                            control_counter = control_counter + 1;
+                        end  
+                    end
+
+                    
+                    % saves all the control surfaces we saw so far as a
+                    % class property (class_aerosurface)
+                    obj.control_surfaces = control_surfaces;
+                    
+                    % looks at the location of all control surfaces
+                    % (belonging to the same component_segment) on this
+                    % aerosurface, then calculates exactly where the wing
+                    % will have to be cut in order to generate all the
+                    % segments necessary to perfectly contain all control
+                    % surfaces
+                    obj = calculate_final_segmentation(obj);
+                    
+                    % looks at the output of calculate_final_segmentation,
+                    % and actually does all the splitting, resulting in
+                    % wing_segments being created through split_segment.
+                    % All of them are of course associated to this specific
+                    % instance (obj) of aerosurface
+                    obj = wing_segmentation(obj);  
+                    
+                    % looks at the output of wing_segmentation (so the
+                    % current wing_segment disposition) and assigns each
+                    % control surface to each spefic wing_segment
+                    obj = assign_control_surfaces(obj);
+                    
+                end
             end
+            n_segments = length(obj.wing_segments);
+            obj.wings_structural_properties.is_fueled = ones(1, n_segments);
+            obj.wings_structural_properties.material = repmat({'aluminum'}, 1, n_segments);        
         end
     end
     
@@ -587,18 +739,21 @@ classdef class_aerosurface
             p2n=xyz(:,1)+f_2*(xyz(:,2)-xyz(:,1));
             p3n=xyz(:,4)+f_2*(xyz(:,3)-xyz(:,4));
             symm=obj.symmetric;
+            
             if nargin==4
                 if f_2==1
                     profile_r=obj.wing_segments(segment_idx).get_profile(f_1);
                     profile_t=obj.wing_segments(segment_idx).profile_t;
                     s1=class_wingsegment([xyz(:,1) p1n p4n xyz(:,4)],symm,profile_r,profile_t);
                     s2=class_wingsegment([p1n p2n p3n p4n],symm,profile_r,profile_t);
+                    
                 else
                     profile_r=obj.wing_segments(segment_idx).get_profile(f_1);
                     profile_t=obj.wing_segments(segment_idx).get_profile(f_2);
                     s1=class_wingsegment([xyz(:,1) p1n p4n xyz(:,4)],symm,profile_r,profile_t);
                     s2=class_wingsegment([p1n p2n p3n p4n],symm,profile_r,profile_t);
-                    s3=class_wingsegment([p2n xyz(:,2) xyz(:,3) p3n],symm,profile_r,profile_t);
+                    s3=class_wingsegment([p2n xyz(:,2) xyz(:,3) p3n],symm,profile_r,profile_t);          
+                    
                 end
             elseif nargin==5
                 if f_2==1
@@ -629,18 +784,104 @@ classdef class_aerosurface
                     s1=class_wingsegment([xyz(:,1) p1n p4n xyz(:,4)],symm,profile_r,profile_t);
                     s2=class_wingsegment([p1n p2n p3n p4n],symm,x,y,profile_r,profile_t);
                     s3=class_wingsegment([p2n xyz(:,2) xyz(:,3) p3n],symm,profile_r,profile_t);
+                    
                 end
+                
+            % If nargin==7, the split+segment function takes the structural
+            % properties (front and rear spar) of the segment, and
+            % interpolates them so as to find the equivalent ones for all
+            % children segments.(nargin variabes 5 and 6 and 7 are dummy
+            % variables necessary to trigger nargin==7)
+            
+            elseif nargin==7
+                
+                if f_2==1
+                    
+                    %Code below same as nargin==4
+                    profile_r=obj.wing_segments(segment_idx).get_profile(f_1);
+                    profile_t=obj.wing_segments(segment_idx).profile_t;
+                    s1=class_wingsegment([xyz(:,1) p1n p4n xyz(:,4)],symm,profile_r,profile_t);
+                    s2=class_wingsegment([p1n p2n p3n p4n],symm,profile_r,profile_t);
+                    %Code above same as nargin==4
+                    
+                    parent_properties = obj.wing_segments(segment_idx).structural_properties;
+                    
+                    % xsi coordinate of front spar and rear spar at the eta of split are calculated through interpolation 
+                    xsi_interp_fs = interp1([0,1],parent_properties.fs_segments(1:2),f_1);
+                    xsi_interp_rs = interp1([0,1],parent_properties.rs_segments(1:2),f_1);
+                    
+                    
+                    % structural properties of children segments are
+                    % initialized by copying parent
+                    s1.structural_properties = parent_properties;
+                    s2.structural_properties = parent_properties;
+                    
+                    % structural_properties of children segments are
+                    % modified to incorporate interpolated xsi.
+                    s1.structural_properties.fs_segments(2) = xsi_interp_fs;
+                    s1.structural_properties.rs_segments(2) = xsi_interp_rs;
+                    
+                    s2.structural_properties.fs_segments(1) = xsi_interp_fs;
+                    s2.structural_properties.rs_segments(1) = xsi_interp_rs;
+                    
+                    
+                else
+                    
+                    %Code below same as nargin==4
+                    profile_r=obj.wing_segments(segment_idx).get_profile(f_1);
+                    profile_t=obj.wing_segments(segment_idx).get_profile(f_2);
+                    s1=class_wingsegment([xyz(:,1) p1n p4n xyz(:,4)],symm,profile_r,profile_t);
+                    s2=class_wingsegment([p1n p2n p3n p4n],symm,profile_r,profile_t);
+                    s3=class_wingsegment([p2n xyz(:,2) xyz(:,3) p3n],symm,profile_r,profile_t);      
+                    %Code above same as nargin==4
+                    
+                    
+                    % Code below does exactly the same of its equivalent
+                    % shown within the if statement above. The only
+                    % difference is that now each spar is divided into 3
+                    % segments, so a total of 4 xsi need to be
+                    % interpolated
+                    parent_properties = obj.wing_segments(segment_idx).structural_properties;
+                    
+                    xsi_interp_fs_1 = interp1([0,1],parent_properties.fs_segments(1:2),f_1);
+                    xsi_interp_rs_1 = interp1([0,1],parent_properties.rs_segments(1:2),f_1);
+                    xsi_interp_fs_2 = interp1([0,1],parent_properties.fs_segments(1:2),f_2);
+                    xsi_interp_rs_2 = interp1([0,1],parent_properties.rs_segments(1:2),f_2);
+                    
+                    s1.structural_properties = parent_properties;
+                    s2.structural_properties = parent_properties;
+                    s3.structural_properties = parent_properties;
+                    
+                    s1.structural_properties.fs_segments(2) = xsi_interp_fs_1;
+                    s1.structural_properties.rs_segments(2) = xsi_interp_rs_1;
+                    
+                    s2.structural_properties.fs_segments(1) = xsi_interp_fs_1;
+                    s2.structural_properties.rs_segments(1) = xsi_interp_rs_1;
+                    s2.structural_properties.fs_segments(2) = xsi_interp_fs_2;
+                    s2.structural_properties.rs_segments(2) = xsi_interp_rs_2;
+                    
+                    
+                    s3.structural_properties.fs_segments(1) = xsi_interp_fs_2;
+                    s3.structural_properties.rs_segments(1) = xsi_interp_rs_2;
+                    
+                end
+                
+                
             end
             if f_2==1
                 if segment_idx+1<=length(obj.wing_segments)
                     obj.wing_segments=[obj.wing_segments(1:segment_idx-1) s1 s2 obj.wing_segments(segment_idx+1:end)];
+                    obj = save_geometry_change(obj,segment_idx,f_1,f_2, 1);
                 else
                     obj.wing_segments=[obj.wing_segments(1:segment_idx-1) s1 s2 ];
+                    obj = save_geometry_change(obj,segment_idx,f_1,f_2, 1);
                 end
             elseif f_1==0
                 obj.wing_segments=[obj.wing_segments(1:segment_idx-1) s2 s3 obj.wing_segments(segment_idx+1:end)];
+                obj = save_geometry_change(obj,segment_idx,f_1,f_2, 1);
             else
                 obj.wing_segments=[obj.wing_segments(1:segment_idx-1) s1 s2 s3 obj.wing_segments(segment_idx+1:end)];
+                obj = save_geometry_change(obj,segment_idx,f_1,f_2, 2);
             end
             obj.c_mac=0;
             for i=1:length(obj.wing_segments)
@@ -719,7 +960,7 @@ classdef class_aerosurface
             
         end
         
-        function obj=compute_grid(obj,x_max,y_max,wake)
+        function obj=compute_grid(obj,x_max,y_max,n_x_min,wake)
             
             grid=[];
             grid_flat=[];
@@ -741,7 +982,7 @@ classdef class_aerosurface
             end
             
             for i=1:length(obj.wing_segments)
-                obj.wing_segments(i)=obj.wing_segments(i).compute_grid(x_max,y_max,wake);
+                obj.wing_segments(i)=obj.wing_segments(i).compute_grid(x_max,y_max,n_x_min,wake);
                 grid_len_b4=length(grid);
                 grid=[grid obj.wing_segments(i).grid];
                 grid_flat=[grid_flat obj.wing_segments(i).grid_flat];
@@ -752,7 +993,7 @@ classdef class_aerosurface
                 
                 is_te=[is_te obj.wing_segments(i).is_te];
                 
-                panel_len_b4=length(panels);
+                panel_len_b4=size(panels,2);
                 te_idx=[te_idx, obj.wing_segments(i).te_idx+grid_len_b4];
                 panels=[panels, obj.wing_segments(i).panels+grid_len_b4];
                 panel_len_aft=length(panels);
@@ -781,7 +1022,7 @@ classdef class_aerosurface
                 
                 for i=1:length(obj.wing_segments)
                     obj.wing_segments(i)=obj.wing_segments(i).right_control_surfaces();
-                    obj.wing_segments(i)=obj.wing_segments(i).compute_grid(x_max,y_max,wake);
+                    obj.wing_segments(i)=obj.wing_segments(i).compute_grid(x_max,y_max,n_x_min,wake);
                     grid_mirror=[grid_mirror obj.wing_segments(i).grid];
                     grid_flat_mirror=[grid_flat_mirror obj.wing_segments(i).grid_flat];
                     
@@ -1348,7 +1589,7 @@ classdef class_aerosurface
            
             for i=1:obj.wing_segments(k).n_span
                 
-                n_pan=sum([obj.wing_segments(k).n_le_panels obj.wing_segments(k).n_chord  obj.wing_segments(k).n_te_panels]);
+                n_pan=sum([obj.wing_segments(k).n_le_panels obj.wing_segments(k).n_ctr1_panels obj.wing_segments(k).n_sp_panels obj.wing_segments(k).n_ctr2_panels  obj.wing_segments(k).n_te_panels]);
 
                 for j=1:n_pan
                     
@@ -1810,11 +2051,20 @@ classdef class_aerosurface
             
         end
         
-        function obj=plot_grid(obj)
+        function obj=plot_grid(obj,varargin)
             hold on
-            for i=1:length(obj.panels)
-                handle= fill3(obj.grid(1,obj.panels(:,i)), obj.grid(2,obj.panels(:,i)),obj.grid(3,obj.panels(:,i)),'b');
-                alpha(handle,0.4);
+            if  ~isempty(varargin)
+                if size(varargin{1},1)==size(obj.panels,2)
+                    for i=1:length(obj.panels)
+                        handle= fill3(obj.grid(1,obj.panels(:,i)), obj.grid(2,obj.panels(:,i)),obj.grid(3,obj.panels(:,i)),'b');
+                        alpha(handle,varargin{1}(i));
+                    end     
+                end
+            else
+                for i=1:length(obj.panels)
+                    handle= fill3(obj.grid(1,obj.panels(:,i)), obj.grid(2,obj.panels(:,i)),obj.grid(3,obj.panels(:,i)),'b');
+                    alpha(handle,0.4);
+                end
             end
         end
         
@@ -1855,11 +2105,24 @@ classdef class_aerosurface
             end
         end
         
+
+        
         function obj=read_xml_definition(obj,xmlstruct)
             di=0;
             if strcmp(xmlstruct.tag,'WING')
                 obj.name=xmlstruct.attribs(1).value;
                 obj.symmetric=str2double(xmlstruct.attribs(2).value);
+                
+                % Initializing the array which contains all control surface
+                % class instances refering to the aerosurface (parent
+                % control surfaces). Each column is a wingsegment, and each
+                % row a different control surface (row1=TE,row2=LE,row3=SP)
+                obj.control_surfaces = cell(3,1);
+                obj.control_surfaces(:) = {0};
+                %initializing the counter which will keep track of the
+                %wingsegments
+                seg_count = 0;
+                
                 for i=1:length(xmlstruct.child)
                     if strcmp(xmlstruct.child(i).tag,'EXTERNALFEM')
                         obj.isExternalFEM = 1;
@@ -1874,6 +2137,8 @@ classdef class_aerosurface
                         end
                     end
                     if strcmp(xmlstruct.child(i).tag,'SEGMENT')
+                        seg_count = seg_count + 1;
+                        obj.control_surfaces(:,seg_count) = {0};
                         if (length(xmlstruct.child(i).child(1).child)==3)
                             n=length(obj.wing_segments);
                             if n~=0
@@ -1900,6 +2165,30 @@ classdef class_aerosurface
                             end
                         end
                         
+                        % Initializing variables which will be later
+                        % necessary to split segments (to accomodate for
+                        % all control surfaces)
+                        CS_etas_arr = [0,1];
+                        te_device_start = [];
+                        te_device_end = [];
+                        le_device_start = [];
+                        le_device_end = [];
+                        sp_device_start = [];
+                        sp_device_end = [];
+                        
+                        
+                        % Adding comments to each line of code would be redundant. Basically code below tries to read the
+                        % control surfaces and beam structure from 3 different indices of the xml segment (indices 11,
+                        % 12 and 13, since at most we will have 3 surfaces, one for each index).
+                        
+                        % Within each index try (11, 12 and 13) we check wether a TE, LE or spoiler control surface is
+                        % present. If one is, it proceeds to check whether the attributes denoting its deflection symmetry
+                        % and taper are defined. Once all data is collected from the XML, a local instance of the
+                        % class_control_surface is created (nargin varies depending on how much stuff was defined within
+                        % XML). For each surface, the start and end etas are saved, to be later used in order to
+                        % segment the whole wing simultaneously (thus avoiding assignment of control surface to the
+                        % wrong segment).
+                        
                         try
                             cs_idx=11;
                             if strcmp(xmlstruct.child(i).child(cs_idx).tag,'CONTROL_SURFACE')
@@ -1918,7 +2207,8 @@ classdef class_aerosurface
                                                 tapered=0;
                                             end
                                         end
-                                        te_device=class_control_surface(xmlstruct.child(i).child(cs_idx).attribs(1).value,0,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl,tapered);
+                                        te_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,0,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl,tapered);
+                                        obj.control_surfaces(1,seg_count) = {te_device};
                                         
                                     catch
                                         tapered=0;
@@ -1929,21 +2219,15 @@ classdef class_aerosurface
                                                 tapered=0;
                                             end
                                         end
-                                        te_device=class_control_surface(xmlstruct.child(i).child(cs_idx).attribs(1).value,0,xmlstruct.child(i).child(cs_idx).child(1).value,1,tapered);
+                                        te_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,0,xmlstruct.child(i).child(cs_idx).child(1).value,1,tapered);
+                                        obj.control_surfaces(1,seg_count) = {te_device};
+                                        
                                     end
                                     
-                                    if (str2double(xmlstruct.child(i).child(cs_idx).child(2).value)==0) && (str2double(xmlstruct.child(i).child(cs_idx).child(3).value)==1)
-                                        obj.wing_segments(i+di)=obj.wing_segments(i+di).add_control_surface(te_device);
-                                    else
-                                        n=length(obj.wing_segments);
-                                        obj=obj.split_segment(n,str2double(xmlstruct.child(i).child(cs_idx).child(2).value),str2double(xmlstruct.child(i).child(cs_idx).child(3).value),te_device);
-                                        if(str2double(xmlstruct.child(i).child(cs_idx).child(2).value)~=0)
-                                            di=di+1;
-                                        end
-                                        if(str2double(xmlstruct.child(i).child(cs_idx).child(3).value)~=0)
-                                            di=di+1;
-                                        end
-                                    end
+                                    te_device_start = str2double(xmlstruct.child(i).child(cs_idx).child(2).value);
+                                    te_device_end = str2double(xmlstruct.child(i).child(cs_idx).child(3).value);
+                                    CS_etas_arr = [CS_etas_arr, te_device_start, te_device_end];
+                                
                                     
                                 elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(2).value,'leading_edge')
                                     try
@@ -1952,13 +2236,70 @@ classdef class_aerosurface
                                         elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'asymmetric')
                                             symdefl=0;
                                         end
-                                        le_device=class_control_surface(xmlstruct.child(i).child(cs_idx).attribs(1).value,1,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl);
+                                        
+                                        tapered=0;
+                                        try
+                                            if strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'tapered')
+                                                tapered=1;
+                                            elseif  strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'constant')
+                                                tapered=0;
+                                            end
+                                        end
+                                        
+                                        le_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,1,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl,tapered);
+                                        obj.control_surfaces(2,seg_count) = {le_device};
+                                        
                                     catch
-                                        le_device=class_control_surface(xmlstruct.child(i).child(cs_idx).attribs(1).value,1,xmlstruct.child(i).child(cs_idx).child(1).value);
+                                        
+                                        tapered=0;
+                                        try
+                                            if strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'tapered')
+                                                tapered=1;
+                                            elseif  strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'constant')
+                                                tapered=0;
+                                            end
+                                        end
+                                        
+                                        le_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,1,xmlstruct.child(i).child(cs_idx).child(1).value,1,tapered);
+                                        obj.control_surfaces(2,seg_count) = {le_device};
+                                        
                                     end
                                     
-                                    obj.wing_segments(i+di)=obj.wing_segments(i+di).add_control_surface(le_device);
+                                    le_device_start = str2double(xmlstruct.child(i).child(cs_idx).child(2).value);
+                                    le_device_end = str2double(xmlstruct.child(i).child(cs_idx).child(3).value);
+                                    CS_etas_arr = [CS_etas_arr, le_device_start, le_device_end];
+                                    
+                                elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(2).value,'center_wing')
+                                    try
+                                        if strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'symmetric')
+                                            symdefl=1;
+                                        elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'asymmetric')
+                                            symdefl=0;
+                                        end
+                                        
+                                        tapered=0;
+                                        try
+                                            if strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'tapered')
+                                                tapered=1;
+                                            elseif  strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'constant')
+                                                tapered=0;
+                                            end
+                                        end
+                                        
+                                        sp_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,2,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl,xmlstruct.child(i).child(cs_idx).child(4).value,xmlstruct.child(i).child(cs_idx).child(5).value,tapered);
+                                        obj.control_surfaces(3,seg_count) = {sp_device};
+                                        
+                                    catch
+                                        sp_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,2,xmlstruct.child(i).child(cs_idx).child(1).value,xmlstruct.child(i).child(cs_idx).child(4).value,xmlstruct.child(i).child(cs_idx).child(5).value);
+                                        obj.control_surfaces(3,seg_count) = {sp_device};
+                                        
+                                    end
+                                    
+                                    sp_device_start = str2double(xmlstruct.child(i).child(cs_idx).child(2).value);
+                                    sp_device_end = str2double(xmlstruct.child(i).child(cs_idx).child(3).value);
+                                    CS_etas_arr = [CS_etas_arr, sp_device_start, sp_device_end];
                                 end
+                                
                             % NBEAMELEMENTS defines the number of the wingsegment's beamelements. This number (if defined) will be used instead of the grid spacing
                             elseif strcmp(xmlstruct.child(i).child(cs_idx).tag,'NBEAMELEMENTS')  
                                 obj.wing_segments(i+di).nBeamelements = str2num(xmlstruct.child(i).child(cs_idx).value);
@@ -1983,7 +2324,9 @@ classdef class_aerosurface
                                                 tapered=0;
                                             end
                                         end
-                                        te_device=class_control_surface(xmlstruct.child(i).child(cs_idx).attribs(1).value,0,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl,tapered);
+                                        te_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,0,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl,tapered);
+                                        obj.control_surfaces(1,seg_count) = {te_device};
+                                        
                                     catch
                                         tapered=0;
                                         try
@@ -1993,10 +2336,15 @@ classdef class_aerosurface
                                                 tapered=0;
                                             end
                                         end
-                                        te_device=class_control_surface(xmlstruct.child(i).child(cs_idx).attribs(1).value,0,xmlstruct.child(i).child(cs_idx).child(1).value,1,tapered);
+                                        te_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,0,xmlstruct.child(i).child(cs_idx).child(1).value,1,tapered);
+                                        obj.control_surfaces(1,seg_count) = {te_device};
+                                       
                                     end
-                                    %te_device=class_control_surface(xmlstruct.child(i).child(cs_idx).attribs(1).value,0,xmlstruct.child(i).child(cs_idx).child(1).value);
-                                    obj.wing_segments(i+di)=obj.wing_segments(i+di).add_control_surface(te_device);
+                                    
+                                    te_device_start = str2double(xmlstruct.child(i).child(cs_idx).child(2).value);
+                                    te_device_end = str2double(xmlstruct.child(i).child(cs_idx).child(3).value);
+                                    CS_etas_arr = [CS_etas_arr, te_device_start, te_device_end];
+                                    
                                 elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(2).value,'leading_edge')
                                     try
                                         if strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'symmetric')
@@ -2004,43 +2352,1096 @@ classdef class_aerosurface
                                         elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'asymmetric')
                                             symdefl=0;
                                         end
-                                        le_device=class_control_surface(xmlstruct.child(i).child(cs_idx).attribs(1).value,1,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl);
+                                        
+                                        tapered=0;
+                                        try
+                                            if strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'tapered')
+                                                tapered=1;
+                                            elseif  strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'constant')
+                                                tapered=0;
+                                            end
+                                        end
+                                        le_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,1,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl,tapered);
+                                        obj.control_surfaces(2,seg_count) = {le_device};
+                                        
                                     catch
-                                        le_device=class_control_surface(xmlstruct.child(i).child(cs_idx).attribs(1).value,1,xmlstruct.child(i).child(cs_idx).child(1).value);
+                                        
+                                        tapered=0;
+                                        try
+                                            if strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'tapered')
+                                                tapered=1;
+                                            elseif  strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'constant')
+                                                tapered=0;
+                                            end
+                                        end
+                                        le_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,1,xmlstruct.child(i).child(cs_idx).child(1).value,1,tapered);
+                                        obj.control_surfaces(2,seg_count) = {le_device};
+                                       
                                     end
-                                    %le_device=class_control_surface(xmlstruct.child(i).child(cs_idx).attribs(1).value,1,xmlstruct.child(i).child(cs_idx).child(1).value);
-                                    obj.wing_segments(i+di)=obj.wing_segments(i+di).add_control_surface(le_device);
+                                    
+                                    le_device_start = str2double(xmlstruct.child(i).child(cs_idx).child(2).value);
+                                    le_device_end = str2double(xmlstruct.child(i).child(cs_idx).child(3).value);
+                                    CS_etas_arr = [CS_etas_arr, le_device_start, le_device_end];
+                                    
+                                elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(2).value,'center_wing')
+                                    try
+                                        if strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'symmetric')
+                                            symdefl=1;
+                                        elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'asymmetric')
+                                            symdefl=0;
+                                        end
+                                        
+                                        tapered=0;
+                                        try
+                                            if strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'tapered')
+                                                tapered=1;
+                                            elseif  strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'constant')
+                                                tapered=0;
+                                            end
+                                        end
+                                        
+                                        sp_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,2,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl,xmlstruct.child(i).child(cs_idx).child(4).value,xmlstruct.child(i).child(cs_idx).child(5).value,tapered);
+                                        obj.control_surfaces(3,seg_count) = {sp_device};
+                                        
+                                    catch
+                                        sp_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,2,xmlstruct.child(i).child(cs_idx).child(1).value,xmlstruct.child(i).child(cs_idx).child(4).value,xmlstruct.child(i).child(cs_idx).child(5).value);
+                                        obj.control_surfaces(3,seg_count) = {sp_device};
+                                        
+                                    end
+                                    
+                                    sp_device_start = str2double(xmlstruct.child(i).child(cs_idx).child(2).value);
+                                    sp_device_end = str2double(xmlstruct.child(i).child(cs_idx).child(3).value);
+                                    CS_etas_arr = [CS_etas_arr, sp_device_start, sp_device_end];
                                 end
                             elseif strcmp(xmlstruct.child(i).child(cs_idx).tag,'NBEAMELEMENTS')  
                                 obj.wing_segments(i+di).nBeamelements = str2num(xmlstruct.child(i).child(cs_idx).value);
                             end  
                         end
                         
+                        
                         try
                             cs_idx=13;
+                            if strcmp(xmlstruct.child(i).child(cs_idx).tag,'CONTROL_SURFACE')
+                                if strcmp(xmlstruct.child(i).child(cs_idx).attribs(2).value,'trailing_edge')
+                                    try
+                                        if strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'symmetric')
+                                            symdefl=1;
+                                        elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'asymmetric')
+                                            symdefl=0;
+                                        end
+                                        tapered=0;
+                                        try
+                                            if strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'tapered')
+                                                tapered=1;
+                                            elseif  strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'constant')
+                                                tapered=0;
+                                            end
+                                        end
+                                        te_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,0,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl,tapered);
+                                        obj.control_surfaces(1,seg_count) = {te_device};
+                                        
+                                    catch
+                                        tapered=0;
+                                        try
+                                            if strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'tapered')
+                                                tapered=1;
+                                            elseif  strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'constant')
+                                                tapered=0;
+                                            end
+                                        end
+                                        te_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,0,xmlstruct.child(i).child(cs_idx).child(1).value,1,tapered);
+                                        obj.control_surfaces(1,seg_count) = {te_device};
+                                       
+                                    end
+                                    
+                                    te_device_start = str2double(xmlstruct.child(i).child(cs_idx).child(2).value);
+                                    te_device_end = str2double(xmlstruct.child(i).child(cs_idx).child(3).value);
+                                    CS_etas_arr = [CS_etas_arr, te_device_start, te_device_end];
+                                    
+                                elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(2).value,'leading_edge')
+                                    try
+                                        if strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'symmetric')
+                                            symdefl=1;
+                                        elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'asymmetric')
+                                            symdefl=0;
+                                        end
+                                        
+                                        tapered=0;
+                                        try
+                                            if strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'tapered')
+                                                tapered=1;
+                                            elseif  strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'constant')
+                                                tapered=0;
+                                            end
+                                        end
+                                        
+                                        le_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,1,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl,tapered);
+                                        obj.control_surfaces(2,seg_count) = {le_device};
+                                        
+                                        
+                                    catch
+                                        tapered=0;
+                                        try
+                                            if strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'tapered')
+                                                tapered=1;
+                                            elseif  strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'constant')
+                                                tapered=0;
+                                            end
+                                        end
+                                        le_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,1,xmlstruct.child(i).child(cs_idx).child(1).value,1,tapered);
+                                        obj.control_surfaces(2,seg_count) = {le_device};
+                                        
+                                    end
+                                    
+                                    le_device_start = str2double(xmlstruct.child(i).child(cs_idx).child(2).value);
+                                    le_device_end = str2double(xmlstruct.child(i).child(cs_idx).child(3).value);
+                                    CS_etas_arr = [CS_etas_arr, le_device_start, le_device_end];
+                                    
+                                elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(2).value,'center_wing')
+                                    try
+                                        if strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'symmetric')
+                                            symdefl=1;
+                                        elseif strcmp(xmlstruct.child(i).child(cs_idx).attribs(3).value,'asymmetric')
+                                            symdefl=0;
+                                        end
+                                        tapered=0;
+                                        try
+                                            if strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'tapered')
+                                                tapered=1;
+                                            elseif  strcmp(xmlstruct.child(i).child(cs_idx).child(1).attribs(1).value,'constant')
+                                                tapered=0;
+                                            end
+                                        end
+                                        
+                                        sp_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,2,xmlstruct.child(i).child(cs_idx).child(1).value,symdefl,xmlstruct.child(i).child(cs_idx).child(4).value,xmlstruct.child(i).child(cs_idx).child(5).value,tapered);
+                                        obj.control_surfaces(3,seg_count) = {sp_device};
+                                        
+                                    catch
+                                        sp_device=class_control_surface_parent(xmlstruct.child(i).child(cs_idx).attribs(1).value,2,xmlstruct.child(i).child(cs_idx).child(1).value,xmlstruct.child(i).child(cs_idx).child(4).value,xmlstruct.child(i).child(cs_idx).child(5).value);
+                                        obj.control_surfaces(3,seg_count) = {sp_device};
+                                        
+                                    end
+                                    
+                                    sp_device_start = str2double(xmlstruct.child(i).child(cs_idx).child(2).value);
+                                    sp_device_end = str2double(xmlstruct.child(i).child(cs_idx).child(3).value);
+                                    CS_etas_arr = [CS_etas_arr, sp_device_start, sp_device_end];
+                                end
+                                
+                            elseif strcmp(xmlstruct.child(i).child(cs_idx).tag,'NBEAMELEMENTS')  
+                                obj.wing_segments(i+di).nBeamelements = str2num(xmlstruct.child(i).child(cs_idx).value);
+                            end  
+                        end
+                        
+                        try
+                            cs_idx=14;
                             if strcmp(xmlstruct.child(i).child(cs_idx).tag,'NBEAMELEMENTS')  
                                 obj.wing_segments(i+di).nBeamelements = str2num(xmlstruct.child(i).child(cs_idx).value);
                             end  
                         end
+                        
+                        % puts all etas within the array of cuts to be
+                        % applied in ascending order. Removes all duplicate
+                        % elements (only 1 cut will be needed in same
+                        % location). Removes 0 and 1 coordinates since
+                        % obviously no cuts are needed there.
+                        CS_etas_arr_ordered = sort(CS_etas_arr,'ascend');
+                        CS_etas_arr_ordered = unique(CS_etas_arr_ordered);
+                        CS_etas_cuts = CS_etas_arr_ordered(CS_etas_arr_ordered~=0);
+                        CS_etas_cuts = CS_etas_cuts(CS_etas_cuts~=1);
+                        
+                        % resize_factor is used to still calculate coorect
+                        % eta coords after change in dimensions due to
+                        % segment splitting.
+                        resize_factor = 1;
+                        
+                        % di is the current segment counter
+                        % within global reference frame of aerosurface, not
+                        % just local frame.
+                        
+                        % di_base is the di before any segments are split
+                        
+                        di_base = di;
+                        prev_eta=0;
+                        
+                        % loop that cuts the segment at CS_etas_cuts
+                        % locations by splitting them.
+                        for cut_count = 1:length(CS_etas_cuts)
+                            %splits the segment. prev_eta and resize-factor
+                            %are used to ensure that CS_etas_cuts is
+                            %translated into the new coordinate system
+                            %(segment splits change geometry).
+                            obj=obj.split_segment(i+di, 0, (CS_etas_cuts(cut_count)-prev_eta)/resize_factor);
+                            prev_eta = CS_etas_cuts(cut_count);
+                            resize_factor = (1-CS_etas_cuts(cut_count));
+                            di = di+1;
+                        end
+                        
+                        
+                        % Reading the names array, to check
+                        % whether the newly added surfaces are simply a
+                        % continuation of previously added ones, in which
+                        % case they will be removed from the parent array,
+                        % but still integrated as children within parents,
+                        % and of course added to their corresponding wing
+                        % segment
+                        if seg_count>1  %if seg_count==1, current surface must be parent
+                            
+                            %looping through array to check TE, LE and SP
+                            for cs_count = 1:size(obj.control_surfaces,1)
+                                for seg_iter = 1:seg_count-1
+                                    % if the names are the same, it means it is  the same surface, in which case the
+                                    % corresponding entry in the control_surfaces array is turned into
+                                    % the index of the segment where the parent is stored
+                                    if ~isnumeric(obj.control_surfaces{cs_count,seg_count})
+                                        if ~isnumeric(obj.control_surfaces{cs_count,seg_iter})
+                                            if strcmp(obj.control_surfaces{cs_count,seg_count}.name,obj.control_surfaces{cs_count,seg_iter}.name)
+                                                obj.control_surfaces(cs_count,seg_count) = {seg_iter};
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end                      
+                        
+                        % runs if TE surfaces are present
+                        if isempty(te_device_start)==0
+                            
+                            % loops over CS_etas_arr_ordered array to find
+                            % start and end segment indices of CS
+                            for temp_count = 1:length(CS_etas_arr_ordered)
+                                if CS_etas_arr_ordered(temp_count) == te_device_start
+                                    te_device_start_idx = (temp_count-1) + di_base + i;
+
+                                elseif CS_etas_arr_ordered(temp_count) == te_device_end
+                                    te_device_end_idx = (temp_count-2) + di_base + i;
+                                end
+                            end
+                            
+                            % if untapered, the root chord of the parent CS is passed to all children CS instances
+                            % created within multiple segments. This is to ensure that the chord is effectively constant
+                            % over multiple segments. See add_control_surface function for more detail
+                            if te_device.is_tapered==0
+                                
+                                c_r_parent = obj.wing_segments(te_device_start_idx).c_r;
+                                
+                                % Loops over all segments containing parent CS, in order to add the children CS to each of them
+                                for loc_seg_count = te_device_start_idx:te_device_end_idx
+                                    
+                                    % if the current entry in control_surface array is a number, it means that this surface cannot be
+                                    % considered the parent, and the parent is stored at the index indicated by the entry.
+                                    if isnumeric(obj.control_surfaces{1,seg_count})
+                                        parent_idx = obj.control_surfaces{1,seg_count};
+                                        child_idx = length(obj.control_surfaces{1,parent_idx}.children);
+                                        obj.control_surfaces{1,parent_idx}.children{1,child_idx+1} = class_control_surface(te_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{1,parent_idx}.children{1,child_idx+1},c_r_parent);
+                                    
+                                        % if the entry is not numeric, then the current entry is also the parent of all children applied to this segment
+                                    else
+                                        child_idx = length(obj.control_surfaces{1,seg_count}.children);
+                                        obj.control_surfaces{1,seg_count}.children{1,child_idx+1} = class_control_surface(te_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{1,seg_count}.children{1,child_idx+1},c_r_parent);
+                                    end
+                                end
+                                
+                            % if the device is tapered, there is no need to pass the parent's root chord to the children.
+                            elseif te_device.is_tapered==1
+                                for loc_seg_count = te_device_start_idx:te_device_end_idx
+                                    % if the current entry in control_surface array is a number, it means that this surface cannot be
+                                    % considered the parent, and the parent is stored at the index indicated by the entry.
+                                    if isnumeric(obj.control_surfaces{1,seg_count})
+                                        parent_idx = obj.control_surfaces{1,seg_count};
+                                        child_idx = length(obj.control_surfaces{1,parent_idx}.children);
+                                        obj.control_surfaces{1,parent_idx}.children{1,child_idx+1} = class_control_surface(te_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{1,parent_idx}.children{1,child_idx+1});
+                                    
+                                        % if the entry is not numeric, then the current entry is also the parent of all children applied to this segment
+                                    else
+                                        child_idx = length(obj.control_surfaces{1,seg_count}.children);
+                                        obj.control_surfaces{1,seg_count}.children{1,child_idx+1} = class_control_surface(te_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{1,seg_count}.children{1,child_idx+1});
+                                    end
+                                end
+                            end
+                        end
+                        
+                        % runs if LE surface is present. Code is identical
+                        % to TE surface case above, see comments of the TE
+                        % case for more details.
+                        if isempty(le_device_start)==0
+                            for temp_count = 1:length(CS_etas_arr_ordered)
+                                if CS_etas_arr_ordered(temp_count) == le_device_start
+                                    le_device_start_idx = (temp_count-1) + di_base + i;
+
+                                elseif CS_etas_arr_ordered(temp_count) == le_device_end
+                                    le_device_end_idx = (temp_count-2) + di_base + i;
+                                end
+                            end
+
+                            if le_device.is_tapered==0
+                                
+                                c_r_parent = obj.wing_segments(le_device_start_idx).c_r;
+                                
+                                for loc_seg_count = le_device_start_idx:le_device_end_idx
+                                    
+                                    % if the current entry in control_surface array is a number, it means that this surface cannot be
+                                    % considered the parent, and the parent is stored at the index indicated by the entry.
+                                    if isnumeric(obj.control_surfaces{2,seg_count})
+                                        parent_idx = obj.control_surfaces{2,seg_count};
+                                        child_idx = length(obj.control_surfaces{2,parent_idx}.children);
+                                        obj.control_surfaces{2,parent_idx}.children{1,child_idx+1} = class_control_surface(le_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{2,parent_idx}.children{1,child_idx+1},c_r_parent);
+                                    
+                                        % if the entry is not numeric, then the current entry is also the parent of all children applied to this segment
+                                    else
+                                        child_idx = length(obj.control_surfaces{2,seg_count}.children);
+                                        obj.control_surfaces{2,seg_count}.children{1,child_idx+1} = class_control_surface(le_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{2,seg_count}.children{1,child_idx+1},c_r_parent);
+                                    end
+                                end
+                                
+                            elseif le_device.is_tapered==1
+                                for loc_seg_count = le_device_start_idx:le_device_end_idx
+                                    
+                                    % if the current entry in control_surface array is a number, it means that this surface cannot be
+                                    % considered the parent, and the parent is stored at the index indicated by the entry.
+                                    if isnumeric(obj.control_surfaces{2,seg_count})
+                                        parent_idx = obj.control_surfaces{2,seg_count};
+                                        child_idx = length(obj.control_surfaces{2,parent_idx}.children);
+                                        obj.control_surfaces{2,parent_idx}.children{1,child_idx+1} = class_control_surface(le_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{2,parent_idx}.children{1,child_idx+1});
+                                    
+                                        % if the entry is not numeric, then the current entry is also the parent of all children applied to this segment
+                                    else
+                                        child_idx = length(obj.control_surfaces{2,seg_count}.children);
+                                        obj.control_surfaces{2,seg_count}.children{1,child_idx+1} = class_control_surface(le_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{2,seg_count}.children{1,child_idx+1});
+                                    end
+                                end
+                            end
+                        end
+                        
+                        
+                        % runs if spoiler surface is present. Code is identical
+                        % to TE surface case above, see comments of the TE
+                        % case for more details.
+                        if isempty(sp_device_start)==0
+                            for temp_count = 1:length(CS_etas_arr_ordered)
+                                if CS_etas_arr_ordered(temp_count) == sp_device_start
+                                    sp_device_start_idx = (temp_count-1) + di_base + i;
+
+                                elseif CS_etas_arr_ordered(temp_count) == sp_device_end
+                                    sp_device_end_idx = (temp_count-2) + di_base + i;
+                                end
+                            end
+
+                            if sp_device.is_tapered==0
+                                
+                                c_r_parent = obj.wing_segments(sp_device_start_idx).c_r;
+                                
+                                for loc_seg_count = sp_device_start_idx:sp_device_end_idx
+                                    
+                                    % if the current entry in control_surface array is a number, it means that this surface cannot be
+                                    % considered the parent, and the parent is stored at the index indicated by the entry.
+                                    if isnumeric(obj.control_surfaces{3,seg_count})
+                                        parent_idx = obj.control_surfaces{3,seg_count};
+                                        child_idx = length(obj.control_surfaces{3,parent_idx}.children);
+                                        obj.control_surfaces{3,parent_idx}.children{1,child_idx+1} = class_control_surface(sp_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{3,parent_idx}.children{1,child_idx+1},c_r_parent);
+                                    
+                                        % if the entry is not numeric, then the current entry is also the parent of all children applied to this segment
+                                    else
+                                        child_idx = length(obj.control_surfaces{3,seg_count}.children);
+                                        obj.control_surfaces{3,seg_count}.children{1,child_idx+1} = class_control_surface(sp_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{3,seg_count}.children{1,child_idx+1},c_r_parent);
+                                    end
+                                end
+                                
+                            elseif sp_device.is_tapered==1
+                                for loc_seg_count = sp_device_start_idx:sp_device_end_idx
+                                    
+                                    % if the current entry in control_surface array is a number, it means that this surface cannot be
+                                    % considered the parent, and the parent is stored at the index indicated by the entry.
+                                    if isnumeric(obj.control_surfaces{3,seg_count})
+                                        parent_idx = obj.control_surfaces{3,seg_count};
+                                        child_idx = length(obj.control_surfaces{3,parent_idx}.children);
+                                        obj.control_surfaces{3,parent_idx}.children{1,child_idx+1} = class_control_surface(sp_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{3,parent_idx}.children{1,child_idx+1});
+                                    
+                                        % if the entry is not numeric, then the current entry is also the parent of all children applied to this segment
+                                    else
+                                        child_idx = length(obj.control_surfaces{3,seg_count}.children);
+                                        obj.control_surfaces{3,seg_count}.children{1,child_idx+1} = class_control_surface(sp_device,child_idx+1,loc_seg_count);
+                                        obj.wing_segments(loc_seg_count) = obj.wing_segments(loc_seg_count).add_control_surface(obj.control_surfaces{3,seg_count}.children{1,child_idx+1});
+                                    end
+                                end
+                            end
+                        end
                     end
                 end
+                
+                
+                
+                % once looping over all wing-segments is finisehd, we need
+                % to unravel the control_surfaces array and remove all
+                % numeric elements
+                
+                % unraveling
+                obj.control_surfaces = reshape(obj.control_surfaces,[1,size(obj.control_surfaces,2)*size(obj.control_surfaces,1)]);
+                
+                % removing numeric elements, thus leaving only parent
+                % surfaces within the array
+                numeric_logic = cellfun(@isnumeric,obj.control_surfaces);
+                obj.control_surfaces = obj.control_surfaces(~numeric_logic);
+                
+                
+                % converting obj.control_surfaces back into an array for
+                % consistency with the rest of the code
+                
+                if ~isempty(obj.control_surfaces)
+                    
+                    for temp_count = 1:length(obj.control_surfaces)
+                        
+                        if obj.symmetric
+                            obj.control_surfaces{temp_count}.is_sym = 1;
+                        else
+                            obj.control_surfaces{temp_count}.is_sym = 0;
+                        end
+                        temp_array(temp_count) = obj.control_surfaces{temp_count};
+                    end
+                    
+                    obj.control_surfaces = temp_array;
+                    
+                else
+                    obj.control_surfaces = [];
+                end
+                
             else
                 fprintf('Unknown Data Format: %s \n', xmlstruct.tag);
             end
         end
         
         function obj=  computeControlSurfacePanelIds(obj)
+            
+            for iSeg=1:length(obj.wing_segments)
+                obj.wing_segments(iSeg)=obj.wing_segments(iSeg).computeControlSurfacePanelIds();
+            end
+            
+            % preparation of spanwise and chordwise stations for full wing
+            if ~isempty(obj.parCS)
+                nPanSeg=[];
                 for iSeg=1:length(obj.wing_segments)
-                    obj.wing_segments(iSeg)=obj.wing_segments(iSeg).computeControlSurfacePanelIds();
+                    nPanSeg=[nPanSeg size(obj.wing_segments(iSeg).panels,2)];
                 end
-                if obj.symmetric
-                    for iSeg=1:length(obj.wing_segments)
-                        if obj.wing_segments(iSeg).has_te_cs
-                        obj.wing_segments(iSeg).te_device.panelIdsL=obj.wing_segments(iSeg).te_device.panelIds+size(obj.panels,2)/2;
+                
+                normPrvMidlines=0;
+                spanWisePointsI=[];
+                spanWisePointsO=[];
+                chordWisePointsF=[];
+                chordWisePointsR=[];
+                
+                for iSeg=1:length(obj.wing_segments)
+                    
+                    nPrvPanels=0;
+                    for jSeg=1:iSeg-1
+                        nPrvPanels=nPrvPanels+(nPanSeg(jSeg));
+                    end
+
+                    nPanels=nPanSeg(iSeg);
+                    nSpan=sum(obj.is_te(nPrvPanels+1:nPrvPanels+nPanels));
+                    nChord=nPanels/nSpan;
+                    innerLEPanel=1+nPrvPanels;
+                    outerLEPanel=(nSpan-1)*nChord+1+nPrvPanels;
+                    innerTEPanel=nChord+nPrvPanels;
+                    outerTEPanel=nPanels+nPrvPanels;
+
+                    midLine=(obj.grid(:,obj.panels(2,outerLEPanel))+obj.grid(:,obj.panels(3,outerTEPanel)))./2-(obj.grid(:,obj.panels(1,innerLEPanel))+obj.grid(:,obj.panels(4,innerTEPanel)))./2;
+                    linPoints=normPrvMidlines+linspace(0,1,nSpan+1)*norm(midLine);
+                    spanWisePointsI=[spanWisePointsI reshape(repmat(linPoints(1:end-1),nChord,1),1,nPanels)];
+                    spanWisePointsO=[spanWisePointsO reshape(repmat(linPoints(2:end),nChord,1),1,nPanels)];
+                    normPrvMidlines=normPrvMidlines+norm(midLine);
+                    for iChord=1:nSpan
+                        %midpoints of panels in this strip
+                        panelIdx=((iChord-1)*nChord+nPrvPanels+1:(iChord)*nChord+nPrvPanels);
+                        midpoints=(obj.grid(:,obj.panels(1,panelIdx))+obj.grid(:,obj.panels(2,panelIdx))+obj.grid(:,obj.panels(3,panelIdx))+obj.grid(:,obj.panels(4,panelIdx)))./4;
+                        Fmidpoints=(obj.grid(:,obj.panels(1,panelIdx))+obj.grid(:,obj.panels(2,panelIdx)))./2;
+                        Rmidpoints=(obj.grid(:,obj.panels(3,panelIdx))+obj.grid(:,obj.panels(4,panelIdx)))./2;
+                        dist=midpoints(:,2:end)-midpoints(:,1);
+                        distF=Fmidpoints(:,2:end)-Fmidpoints(:,1);
+                        distR=Rmidpoints(:,2:end)-Fmidpoints(:,1);
+                        totDist=norm(Rmidpoints(:,end)-Fmidpoints(:,1));
+                        chordWisePointsF=[chordWisePointsF [0 sqrt(sum(distF.^2))./totDist]];
+                        chordWisePointsR=[chordWisePointsR [sqrt(sum(distF(:,1).^2))/totDist sqrt(sum(distR.^2))./totDist]];
+                    end
+
+                %     hold on; scatter3(obj.grid(1,obj.panels(:,innerLEPanel)),obj.grid(2,obj.panels(:,innerLEPanel)),obj.grid(3,obj.panels(:,innerLEPanel)),'o')
+                %     hold on; scatter3(obj.grid(1,obj.panels(:,outerLEPanel)),obj.grid(2,obj.panels(:,outerLEPanel)),obj.grid(3,obj.panels(:,outerLEPanel)),'+')
+                %     hold on; scatter3(obj.grid(1,obj.panels(:,innerTEPanel)),obj.grid(2,obj.panels(:,innerTEPanel)),obj.grid(3,obj.panels(:,innerTEPanel)),'d')
+                %     hold on; scatter3(obj.grid(1,obj.panels(:,outerTEPanel)),obj.grid(2,obj.panels(:,outerTEPanel)),obj.grid(3,obj.panels(:,outerTEPanel)),'s')
+
+                end
+                    spanWisePointsI=spanWisePointsI/normPrvMidlines;
+                    spanWisePointsO=spanWisePointsO/normPrvMidlines;
+                    spanWiseLength=normPrvMidlines;
+                    
+            end
+            
+            
+            for iParCS=1:length(obj.parCS)
+                %check if panels are partially inside
+                %panels are partially inside when one of the F/R points or
+                %I/O points are inside
+                pointsR= and(chordWisePointsR<=obj.parCS{iParCS}.posChordR, chordWisePointsR>=obj.parCS{iParCS}.posChordF);
+                pointsF= and(chordWisePointsF<=obj.parCS{iParCS}.posChordR, chordWisePointsF>=obj.parCS{iParCS}.posChordF);
+                pointsI= and(spanWisePointsI<=obj.parCS{iParCS}.posSpanOB,spanWisePointsI>=obj.parCS{iParCS}.posSpanIB);
+                pointsO= and(spanWisePointsO<=obj.parCS{iParCS}.posSpanOB,spanWisePointsO>=obj.parCS{iParCS}.posSpanIB);
+                panelids=and(or(and(pointsF,pointsR),xor(pointsF,pointsR)),or(and(pointsI,pointsO),xor(pointsI,pointsO)));
+                
+                fullyInside=and(and(pointsF,pointsR),and(pointsI,pointsO));
+                %compute fractions of panels which are partially inside
+                rect1=[chordWisePointsF' spanWisePointsI' (chordWisePointsR-chordWisePointsF)' (spanWisePointsO-spanWisePointsI)'];
+                rect2=[obj.parCS{iParCS}.posChordF, obj.parCS{iParCS}.posSpanIB, obj.parCS{iParCS}.posChordR-obj.parCS{iParCS}.posChordF , obj.parCS{iParCS}.posSpanOB-obj.parCS{iParCS}.posSpanIB];
+                allFract=rectint(rect1,rect2)./[rect1(:,3).*rect1(:,4)];
+                obj.parCS{iParCS}.fraction=allFract(find(panelids));
+             
+                
+                
+                %calculate inner point
+                %find id of panel closest to inner front hinge axis which
+                %is the first panel in panelids
+                id1=find(panelids,1);
+                panelPoints=obj.grid(:,obj.panels(:,id1));
+                %find fraction of span of this panel at which the control
+                %surface starts
+                fractChord=interp1([chordWisePointsF(id1) chordWisePointsR(id1)],[0 1],obj.parCS{iParCS}.posChordF);
+                fractSpan=interp1([spanWisePointsI(id1) spanWisePointsO(id1)],[0 1],obj.parCS{iParCS}.posSpanIB);
+                %calculate inner point
+                innerHingePoint=(panelPoints(:,1)*(1-fractChord)+panelPoints(:,4)*fractChord)*(1-fractSpan)+(panelPoints(:,2)*(1-fractChord)+panelPoints(:,3)*fractChord)*(fractSpan);
+                
+                %calculate outer hinge point for axis
+                %first take last panel id, take this spanwise position and
+                %find first panel id in panelids which has this spanwise
+                %position
+                idLast=find(panelids,1,'last');
+                id2=find(and(panelids,spanWisePointsI==spanWisePointsI(idLast)),1);
+                panelPoints2=obj.grid(:,obj.panels(:,id2));
+                %find fraction of span of this panel at which the control
+                %surface leading edge ends
+                fractChord2=interp1([chordWisePointsF(id2) chordWisePointsR(id2)],[0 1],obj.parCS{iParCS}.posChordF);
+                fractSpan2=interp1([spanWisePointsI(id2) spanWisePointsO(id2)],[0 1],obj.parCS{iParCS}.posSpanOB);
+                outerHingePoint=(panelPoints2(:,1)*(1-fractChord2)+panelPoints2(:,4)*fractChord2)*(1-fractSpan2)+(panelPoints2(:,2)*(1-fractChord)+panelPoints2(:,3)*fractChord)*(fractSpan2);
+                
+                %calculate hinge direction
+                obj.parCS{iParCS}.panelIds=find(panelids)+obj.panel_start_idx-1;
+                obj.parCS{iParCS}.hingeAxis=(outerHingePoint-innerHingePoint)/norm(outerHingePoint-innerHingePoint);
+                obj.parCS{iParCS}.hingePoint=innerHingePoint;
+            end
+            
+            if obj.symmetric
+                
+                
+                for iParCS=1:length(obj.parCS)
+                    obj.parCS{iParCS}.panelIdsL=obj.parCS{iParCS}.panelIds+size(obj.panels,2)/2;
+                end
+                
+                
+                
+                
+                for iSeg=1:length(obj.wing_segments)
+                    
+                    if obj.wing_segments(iSeg).has_te_cs
+                        
+                        obj.wing_segments(iSeg).te_device.panelIdsL = obj.wing_segments(iSeg).te_device.panelIds+size(obj.panels,2)/2;
+                        obj.wing_segments(iSeg).te_device.panelIds_standard_L = obj.wing_segments(iSeg).te_device.panelIds_standard+size(obj.panels,2)/2;
+                        
+                        if ~isempty(obj.wing_segments(iSeg).te_device.panelIds_special)
+                            obj.wing_segments(iSeg).te_device.panelIds_special_L = obj.wing_segments(iSeg).te_device.panelIds_special+size(obj.panels,2)/2;
+                        end
+                        
+                    end
+                    
+                    if obj.wing_segments(iSeg).has_le_cs
+                        obj.wing_segments(iSeg).le_device.panelIdsL=obj.wing_segments(iSeg).le_device.panelIds+size(obj.panels,2)/2;
+                    end
+                    
+                    if obj.wing_segments(iSeg).has_sp_cs
+                        
+                        obj.wing_segments(iSeg).sp_device.panelIdsL=obj.wing_segments(iSeg).sp_device.panelIds+size(obj.panels,2)/2;
+                        obj.wing_segments(iSeg).sp_device.panelIds_standard_L=obj.wing_segments(iSeg).sp_device.panelIds_standard+size(obj.panels,2)/2;
+                        
+                        if ~isempty(obj.wing_segments(iSeg).sp_device.panelIds_special)
+                            obj.wing_segments(iSeg).sp_device.panelIds_special_L = obj.wing_segments(iSeg).sp_device.panelIds_special+size(obj.panels,2)/2;
+                        end
+                    end
+                    
+                end
+            end
+        end
+        
+
+        
+        % this function is called whenever split_segment is used. It saves
+        % the changes in geometry in a way that makes it possible to
+        % related the current geometry (and its segment reference system)
+        % with the original one that was described in CPACS.
+        function obj = save_geometry_change(obj,segment_idx,f_1,f_2, split_type)
+            
+            if ~(isempty(obj.geom_arr))
+            
+            % determines what type of split segment was called
+                switch split_type
+
+                    % split_segment type resulting in the parent segment being
+                    % split into 2 children segments (s1 and s2 or s2 and s3). Techinically
+                    % s1 should be to the left of the original segment, and s3
+                    % to the right, but this is not entirely certain.
+                    case 1
+
+                        if f_2 == 1
+
+                            sub_eta_1 = f_1 * obj.geom_arr(segment_idx);
+                            sub_eta_2 = obj.geom_arr(segment_idx) - sub_eta_1;
+
+                            obj.geom_arr = [obj.geom_arr(1:segment_idx-1), sub_eta_1, sub_eta_2,obj.geom_arr(segment_idx+1:end)];
+
+                        elseif f_1 == 0
+                            sub_eta_3 = f_2 * obj.geom_arr(segment_idx);
+                            sub_eta_2 = obj.geom_arr(segment_idx) - sub_eta_3;
+                            obj.geom_arr = [obj.geom_arr(1:segment_idx-1), sub_eta_2, sub_eta_3,obj.geom_arr(segment_idx+1:end)];
+
+                        else
+                            msg = 'split_segment method behavior is unexpected';
+                            error(msg);
+                        end
+                    % in both instances of geom_arr above, the etas are saved
+                    % in such a way that they still represent the eta
+                    % coordinate of the cut taken from the beginning of the
+                    % original CPACS segment which was being cut. The reason
+                    % behind this will become clear in the gen_cell_arrays
+                    % function
+
+
+                    % split_segment type resulting in the parent segment being
+                    % split into 3 children segments (s1, s2 and s3). Techinically
+                    % s1 should be to the left of the original segment, and s3
+                    % to the right, but this is not entirely certain.
+                    case 2
+
+                        sub_eta_1 = f_1 * obj.geom_arr(segment_idx);
+                        sub_eta_3 = f_2 * obj.geom_arr(segment_idx);
+                        sub_eta_2 = obj.geom_arr(segment_idx) - sub_eta_1 - sub_eta_3;
+
+                        obj.geom_arr = [obj.geom_arr(1:segment_idx-1), sub_eta_1, sub_eta_2, sub_eta_3,obj.geom_arr(segment_idx+1:end)];
+                    % geom_arr within this case follows the same logic as in
+                    % case 1.
+                end
+            end
+        end
+        
+        % This function takes the geom_arr of the aerosurface (generated
+        % through save_geometry_change, and actually converts it in a
+        % format which can be easily used to relate the new wing
+        % segmentation with the original CPACS one.
+        function [obj, geom_cell, etas_cell] = gen_cell_arrays(obj)
+            
+            % The section below takes the geom array and re-arranges it
+            % into an easier to read cell array. Each element of the cell
+            % array is one of the original CPACS wing segments. The 
+            geom_cell = cell(0,0); %will contain the geometry of the wing segment cuts
+            etas_cell = cell(0,0); %will contain the etas of the wing segments in the new coord sys
+
+            seg_count = 1;
+            
+            % the while loop does the following: it begins scanning the
+            % geometry array from the start. Each iteration, the index
+            % advances by one. Once the elements within seg_count and
+            % loc_count sum up to 1, it means that all the segments within
+            % those 2 indices used to be part of a single CPACS segment.
+            % This is due to the way that the geom array is created.
+            while seg_count < length(obj.geom_arr) + 1
+                
+                loc_sum = 0;
+                loc_count = seg_count - 1;
+                
+                while loc_sum<1
+                    
+                    loc_count = loc_count + 1;
+                    loc_sum = sum(obj.geom_arr(seg_count:loc_count));                   
+                end
+                
+                geom_cell{end+1} = obj.geom_arr(seg_count:loc_count);
+                etas_cell{end+1} = cumsum(obj.geom_arr(seg_count:loc_count));
+                
+                seg_count = loc_count + 1;
+                
+                % the geom_cell output is simply the cell version of the geom arr
+                % the etas_cell is a nested (2D) cell array. The first dimention
+                % contains the "parent CPACS" segments. Within each parent
+                % segment, the eta coordinates of the cuts necessary to form
+                % the new additional segments can be found. The coordinates
+                % within each parent elements must of course be within 0 and 1.
+                
+                if sum(geom_cell{end}) ~= 1.
+                    msg = 'The sum of the elements within each cell is not 1';
+                    error(msg);
+                end
+            end
+        end
+
+
+        % looks at the location of all control surfaces
+        % (belonging to the same component_segment) on this
+        % aerosurface, then calculates exactly where the wing
+        % will have to be cut in order to generate all the
+        % segments necessary to perfectly contain all control
+        % surfaces
+        function obj = calculate_final_segmentation(obj)
+            
+            % generates the geometry and eta cells of the wing segmentation
+            % AFTER that extra segments have been added due to structure,
+            % but BEFORE that extra segments are added due to Control
+            % Surfaces.
+            [obj, obj.curr_geom_cell, obj.curr_etas_cell] = gen_cell_arrays(obj);
+            
+            % initializes "final" version of eats cells (which will contain
+            % the segmentation which accounts for control surfaces)
+            obj.final_etas_cell = obj.curr_etas_cell;
+            
+            % initializes "cuts" version of etas_cell. The reference system
+            % is the same as etas_cell, but the etas stored in etas_cuts
+            % are only the ones which will be later fed to split_segment in
+            % order to actually split the segments
+            obj.etas_cuts = cell(1,length(obj.final_etas_cell));
+
+            % loops over all control surfaces associated with this
+            % aerosurface object.
+            for CS_counter = 1:length(obj.control_surfaces)
+
+                CS_current = obj.control_surfaces(CS_counter);
+
+                % saves the "start" eta and "end" eta of this control
+                % surface instance. The eta coords are in the reference
+                % frames belonging respectively to the "start" and "end"
+                % segments. The aforementioned segments are the CPACS
+                % segments, NOT THE CURRENT ONES DEFINED IN DAEDALUS
+                eta_start = CS_current.start_segmentEta;
+                eta_end = CS_current.end_segmentEta;
+                
+                % same as above, but regarding the start and end segments
+                % indices. Again, these are CPACS INDICES, NOT DAEDALUS
+                start_seg_idx = CS_current.start_segment_index;
+                end_seg_idx = CS_current.end_segment_index;
+                
+                % adding eta coordinate of cuts due to start and end of
+                % control surfaces to their respective segments.
+                obj.etas_cuts{start_seg_idx}(end+1) = eta_start;
+                obj.etas_cuts{end_seg_idx}(end+1) = eta_end;
+                
+                % all the if statements below are necessary in case no cuts
+                % are required within the parent CPACS segment, in which
+                % case the output needs to be specified in a certain way,
+                % so that later code knows that that parent segment is to
+                % be left alone.
+                if obj.final_etas_cell{start_seg_idx} == 1
+                    obj.final_etas_cell{start_seg_idx} = [eta_start,1];
+                else
+                    obj.final_etas_cell{start_seg_idx}(end+1) = eta_start;
+                end
+                
+                if obj.final_etas_cell{end_seg_idx} == 1
+                    obj.final_etas_cell{end_seg_idx} = [eta_end,1];
+                    
+                elseif isequal(obj.final_etas_cell{end_seg_idx},[0,1])==1 && eta_end == 1
+                    
+                else
+                    obj.final_etas_cell{end_seg_idx}(end+1) = eta_end;
+                end
+            end
+            
+            % within this for loops, the elements of the final_etas_cell
+            % and etas_cuts arrays are re-ordered and if necessary removed
+            for cell_counter = 1:length(obj.final_etas_cell)
+                
+                % rounds elements of both cells to 4 decimal digits. This
+                % allows for comparison later on, in order to determine
+                % which control surface belongs to which segment
+                obj.final_etas_cell{cell_counter} = round(obj.final_etas_cell{cell_counter},4);
+                obj.etas_cuts{cell_counter} = round(obj.etas_cuts{cell_counter},4);
+                
+                % arranges etas within each parent segment in ascending order
+                obj.final_etas_cell{cell_counter} = sort(obj.final_etas_cell{cell_counter},'ascend');
+                
+                % Removes etas within same parent segment which are not
+                % unique (THIS OCCURS AFTER ROUNDING, MEANING THAT
+                % SEGMENTS LESS THAN 1e-4 APART WILL BE MERGED INTO 1.
+                % POSSIBLE LOSS OF DATA.
+                obj.final_etas_cell{cell_counter} = unique(obj.final_etas_cell{cell_counter});
+                
+                % etas_cuts might contain some etas which are the same as
+                % in curr_etas_cell. Since in etas_cuts we only want the
+                % etas where we have to apply a cut, the block below first
+                % removes all elements from etas_cuts which are in common
+                % with curr_etas_cell (within the same CPACS parent segment
+                % of course). Then the elements within etas_cuts are
+                % soreted in ascending order. Finally, all repeated
+                % elements are removed (in case 2 control surfaces have
+                % extremeties on the same eta).
+                obj.etas_cuts{cell_counter} = setdiff(obj.etas_cuts{cell_counter}, obj.curr_etas_cell{cell_counter});
+                obj.etas_cuts{cell_counter} = sort(obj.etas_cuts{cell_counter},'ascend');
+                obj.etas_cuts{cell_counter} = unique(obj.etas_cuts{cell_counter});
+            end
+        end
+        
+        % looks at the output of calculate_final_segmentation,
+        % and actually does all the splitting, resulting in
+        % wing_segments being created through split_segment.
+        % All of them are of course associated to this specific
+        % instance (obj) of aerosurface.
+        
+        % get ready for a headache, the loops below are pretty nested.
+        function obj = wing_segmentation(obj)
+            
+            idx_seg = length(obj.final_etas_cell); 
+            
+            %idx_seg represents the CPACS parent segment index that we are
+            %currently looking at
+            while idx_seg>0
+                
+                % the if statements below are necessary in case a parent
+                % segment is not supposed to be cut
+                if length(obj.final_etas_cell{idx_seg}) == 2
+                    
+                    if obj.final_etas_cell{idx_seg}(1) == 0 && obj.final_etas_cell{idx_seg}(2) == 1
+                        cnd = 1;
+                    else
+                        cnd = 2;
+                    end
+                    
+                elseif obj.final_etas_cell{idx_seg} == 1
+                    cnd = [0,0];
+                    
+                else
+                    cnd = [1,1];
+                end
+                
+                % the if statement below runs if the parent segment is
+                % supposed to be cut
+                if  sum(cnd)== 2
+                    
+                    % idx2_cut is the segment index (WITHIN THE CPACS
+                    % PARENT) of the cut that we want to apply
+                    for idx2_cut = length(obj.etas_cuts{idx_seg}):-1:1
+
+                        % idx2_curr is the segment index (WITHIN THE CPACS
+                        % PARENT) of the eta of an already existing segment
+                        % within the CPACS parent
+                        idx2_curr = length(obj.curr_etas_cell{idx_seg});
+                        
+                        % the loops below shows the logic behind this function. Basically the idx_seg and idx2_cut are
+                        % fixed, so we are looking at the eta of a specific cut that we want to apply to a specific (parent)
+                        % segment. The idx2_curr is decreased, until the eta of an already existing segment border is to
+                        % the left (smaller) of the cut that we want to apply. This means that we pick a cut within a
+                        % parent segment, then we swipe, from right to left, the already existing children segment
+                        % edges, in order to find a segmernt TO THE LEFT OF THE CUT WE WANT TO CREATE. Once we find one,
+                        % split_segment is used on that segment, thus generaing 2 segments (hence 1 new one). The "new"
+                        % segment will be to the right of the "original one". The advantage of this is that we do not
+                        % have to keep track within the index system of the new segments we are creating, as they will all be
+                        % to the RIGHT of the ones we are interested in, meaning that the indices that we will work with
+                        % in the furure are untouched.
+                        while obj.etas_cuts{idx_seg}(idx2_cut) < obj.curr_etas_cell{idx_seg}(idx2_curr)
+                            idx2_curr = idx2_curr - 1;
+                        
+                        
+                            % In case there is no pre-existing segment edge
+                            % to the left of the new cut, we have to split
+                            % the segment to the right, thus affecting the
+                            % indices of the segments before it. If that is
+                            % the case, the if statement below is executed,
+                            % the segments are split, and the change in
+                            % indices is taken into account.
+                            if idx2_curr == 0
+                                
+                                % whenever you see code with cellfun, it
+                                % means that the segment index IN THE
+                                % GLOBAL DAEDALUS frame of reference is
+                                % being calculated. This is found by going
+                                % through each CPACS parent before the
+                                % current segment, summing the segments
+                                % they contain, and finally adding the
+                                % segments within the current CPACS parent,
+                                % but preceding (to the left) the specific
+                                % segment we are looking at
+                                seg_idx_cut = sum(cellfun(@(x) numel(x),obj.curr_etas_cell(1:idx_seg)))...
+                                - sum(cellfun(@(x) numel(x),obj.curr_etas_cell(idx_seg))) + 1;
+                                
+                                % does the cutting
+                                f_2 = (obj.etas_cuts{idx_seg}(idx2_cut))/ (obj.curr_etas_cell{idx_seg}(1));
+                                obj = obj.split_segment(seg_idx_cut,0,f_2,0,0,0);
+                                
+                                % accounts for segment being added to the
+                                % left and indices changing
+                                obj.curr_etas_cell{idx_seg} = [obj.etas_cuts{idx_seg}(idx2_cut),obj.curr_etas_cell{idx_seg}];
+                                break;
+                            end 
+                        end
+                    
+                        
+                        % this if statement runs if it is possible to
+                        % create a new segment to the right of a
+                        % pre-existing one
+                        if idx2_curr ~= 0
+                            
+                            % see comment above for similar code (using
+                            % cellfun)
+                            seg_idx_cut = sum(cellfun(@(x) numel(x),obj.curr_etas_cell(1:idx_seg)))...
+                                - sum(cellfun(@(x) numel(x),obj.curr_etas_cell(idx_seg)))...
+                                + idx2_curr;
+
+
+                            % Always split creating segments on the outer section
+                            f_2 = (obj.etas_cuts{idx_seg}(idx2_cut) - obj.curr_etas_cell{idx_seg}(idx2_curr)) / (1-obj.curr_etas_cell{idx_seg}(idx2_curr));
+                            obj = obj.split_segment(seg_idx_cut,0,f_2,0,0,0);
+                            
+                            obj.curr_etas_cell{idx_seg} = [obj.curr_etas_cell{idx_seg}(1:idx2_curr), obj.etas_cuts{idx_seg}(idx2_cut),obj.curr_etas_cell{idx_seg}(idx2_curr+1:end)];
+                            
                         end
                     end
                 end
+                
+                % once we looked at all cuts within a CPACS parent segment,
+                % we can move to the next one (moving from right to left,
+                % so from tip to root).
+                idx_seg = idx_seg - 1;
+
+            end
+        end
+    
+        % looks at the output of wing_segmentation (so the
+        % current wing_segment disposition) and assigns each
+        % control surface to each spefic wing_segment
+        function obj = assign_control_surfaces(obj)
+            
+            % the obj.final_etas_cell cell array is both used to calculate
+            % segment indices and to associate the starting and ending
+            % points of control surfaces on the wing. In special cases (when a
+            % control surface is perfectly contained within a parent segment) the 
+            % final_etas_cell of that parent segment is written as [0,1].
+            % This should be read as 1 segment, but is instead read as 2. 
+            
+            % This knockdown_arr
+            % fixes that. Each parent segment has a certain knockdown
+            % value, which needs to be applied to all indices of all
+            % wingsegments belonging to that parent.
+            knockdown_arr = zeros(1,length(obj.final_etas_cell));
+            
+            for knock_index = 1:length(obj.final_etas_cell)
+                
+                if isequal(obj.final_etas_cell{knock_index}, [0,1])
+                    
+                    knockdown_arr(knock_index) = 1;
+                end
+            end
+            
+            knockdown_arr = cumsum(knockdown_arr) - knockdown_arr;
+            
+            % loops through all control surfaces belonging to this
+            % aerosurface object
+            for CS_counter = 1:length(obj.control_surfaces)
+
+                CS_current = obj.control_surfaces(CS_counter);
+                
+                % the loop below takes the starting eta of a control
+                % surface (within the parent CPACS segment frame of
+                % reference) and compares it with the eta of the final
+                % segmentation of the wing, within the same CPACS parent
+                % elements, and within of course the same reference frame.
+                % Once the same eta coordinate is found, the inde of the
+                % start child segment within its parent is found (for that
+                % specific control surface)
+                start_sub_idx = 1;
+                while round(obj.final_etas_cell{CS_current.start_segment_index}(start_sub_idx),4) ~= round(CS_current.start_segmentEta,4)
+                    start_sub_idx = start_sub_idx + 1;
+                end
+                
+                if round(CS_current.start_segmentEta,4) == 1.0
+                    start_sub_idx = start_sub_idx + 1;
+                end
+                
+                % the loop below does the same as the one above, only for
+                % the end of the control surface (which means that WE MAY
+                % OR MAY NOT be looking within the same CPACS parent
+                % segment. It depends on the CS_current.end_segment_index).
+                
+                end_sub_idx = 1;
+                while round(obj.final_etas_cell{CS_current.end_segment_index}(end_sub_idx),4) ~= round(CS_current.end_segmentEta,4)
+                    end_sub_idx = end_sub_idx + 1;
+                end
+                
+                % calculates the start segment index within the GLOBAL
+                % DAEDALUS frame of reference. Functioning of the cellfun
+                % code below is explained above similar code within
+                % wing_segmentation method.
+                final_start_seg_idx = sum(cellfun(@(x) numel(x),obj.final_etas_cell(1:CS_current.start_segment_index)))...
+                - sum(cellfun(@(x) numel(x),obj.final_etas_cell(CS_current.start_segment_index)))...
+                + start_sub_idx + 1;
+                
+                % same as above, but for the end segment index in the GLOBAL
+                % DAEDALUS frame of reference.
+                final_end_seg_idx = sum(cellfun(@(x) numel(x),obj.final_etas_cell(1:CS_current.end_segment_index)))...
+                - sum(cellfun(@(x) numel(x),obj.final_etas_cell(CS_current.end_segment_index)))...
+                + end_sub_idx ;
+            
+                % applying index knockdown
+                final_start_seg_idx = final_start_seg_idx - knockdown_arr(CS_current.start_segment_index);
+                final_end_seg_idx = final_end_seg_idx - knockdown_arr(CS_current.end_segment_index);
+                
+                % makes sure that right index is saved in case eta_end is
+                % right on the edge between the current and next segment,
+                % and the segment was never split (original parent).
+                if obj.final_etas_cell{CS_current.end_segment_index}(end_sub_idx) == 1 && isequal(obj.final_etas_cell{CS_current.end_segment_index}, [0,1])
+                    final_end_seg_idx = final_end_seg_idx - 1;
+                end
+                
+                % necessary to avoid error due to exceeding matrix index
+                % when running elseif statement below this one while the CS
+                % "starts" at eta=1
+                if round(CS_current.start_segmentEta,4) == 1
+                    
+                % makes sure that right index is saved in case eta_end is
+                % right on the edge between the current and next segment,
+                % and the segment was never split (original parent).
+                elseif obj.final_etas_cell{CS_current.start_segment_index}(start_sub_idx) == 0 && isequal(obj.final_etas_cell{CS_current.start_segment_index}, [0,1])
+                    final_start_seg_idx = final_start_seg_idx - 1;                    
+                end
+                
+                % adds current control surface to its start wing segment
+                nr_segments_covered = abs(final_end_seg_idx - final_start_seg_idx)+1;
+                obj.control_surfaces(CS_counter).children = cell(1,nr_segments_covered);
+                obj.control_surfaces(CS_counter).children{1,1} = class_control_surface(CS_current,1,final_start_seg_idx);
+                obj.wing_segments(final_start_seg_idx) = obj.wing_segments(final_start_seg_idx).add_control_surface(obj.control_surfaces(CS_counter).children{1,1});
+                
+                
+                % if the difference beetween the end and start wing segment
+                % indices is more than 1, it means that there are additonal
+                % wing segments present between them. As the control
+                % surface begins at the start wing segment and finishes at
+                % the end wing segment, it must necessarily span all wing
+                % segments in between. The loop below applies the control
+                % surface to the "in-between" segments.
+                if abs(final_end_seg_idx - final_start_seg_idx) > 1
+                    
+                    for mid_idx = final_start_seg_idx+1 : final_end_seg_idx-1
+                        obj.control_surfaces(CS_counter).children{1,mid_idx+1-final_start_seg_idx} = class_control_surface(CS_current,mid_idx+1-final_start_seg_idx,mid_idx);
+                        obj.wing_segments(mid_idx) = obj.wing_segments(mid_idx).add_control_surface(obj.control_surfaces(CS_counter).children{1,mid_idx+1-final_start_seg_idx});
+                    end
+                end
+                
+                
+                if abs(final_end_seg_idx - final_start_seg_idx) > 0
+                    % adds current control surface to its end wing segment
+                    obj.control_surfaces(CS_counter).children{1,end} = class_control_surface(CS_current,nr_segments_covered,final_end_seg_idx);
+                    obj.wing_segments(final_end_seg_idx) = obj.wing_segments(final_end_seg_idx).add_control_surface(obj.control_surfaces(CS_counter).children{1,end});
+                end
+            end
         end
     end
 end
-

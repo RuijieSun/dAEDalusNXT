@@ -36,7 +36,7 @@ function obj = f_assemble(obj,add_eigenmass,add_fuelmass,add_engineforces,add_ge
     if obj.update_K==1 
         if ~obj.isExternalFEM
             if strcmp(obj.identifier,'MainWing')
-                disp('Warning: Wing matrix is changed')
+%                 disp('Warning: Wing matrix is changed')
             end
             obj.K=obj.K*0;
             obj=obj.f_calc_element_stiffness();

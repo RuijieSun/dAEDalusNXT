@@ -129,6 +129,8 @@ classdef class_crosssection_fuselage < class_crosssection
             obj.tensile_yield_fr=Ult_Tstrength_fr;
             
             obj.t_min_sk=t_min_sk;
+            obj.t_sk_eq=t_min_sk;
+            obj.t_fr_eq=t_min_sk;
         end
         
         function [r]=get_dimensions(obj)

@@ -82,9 +82,9 @@ Rigid_AerodataDamping_CoeffCnr=zeros(length(vecConf),length(vecMa),length(vecAlp
 tic
 
 if deflected
-    wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,state,aircraft.reference); 
+    wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,state,aircraft.reference, aircraft.control_surfaces_parents); 
 else
-    wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,state,aircraft.reference); 
+    wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,state,aircraft.reference, aircraft.control_surfaces_parents); 
 end
 wingaero=wingaero.f_solve_std();
 wingaero=wingaero.f_solve_full();
@@ -93,7 +93,7 @@ t_stop=toc
 tic;
 wingaero=wingaero.f_set_state(state);
 wingaero=wingaero.set_grid(aircraft.grid,aircraft.panels);
-%wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,state,aircraft.reference);
+%wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,state,aircraft.reference, aircraft.control_surfaces_parents); 
 wingaero=wingaero.f_solve_std();
 wingaero=wingaero.f_solve_full();
 t_stop2=toc;
@@ -150,10 +150,10 @@ end
 if deflected    
     aircraft=aircraft.compute_grid();
     aircraft=aircraft.compute_deflected_grid(def);
-    wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,state,aircraft.reference);
+    wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,state,aircraft.reference, aircraft.control_surfaces_parents); 
 else
     aircraft=aircraft.compute_grid();
-    wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,state,aircraft.reference);
+    wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,state,aircraft.reference, aircraft.control_surfaces_parents); 
 end
 lengthAlpha=length(vecAlpha);
 lengthBeta=length(vecBeta);
@@ -199,10 +199,10 @@ for l=1:lengthConf
                 disp(['Ma=' num2str(Ma) ' aoa=' num2str(alpha) ' beta=' num2str(beta)])
                 state=class_aero_state(Uinf,alpha,beta,Ma,rho_air,mu);
                 if deflected
-                    wingaero=class_VLM_solver(aircraftma.grid_deflected,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference);
+                    wingaero=class_VLM_solver(aircraftma.grid_deflected,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference, aircraftma.control_surfaces_parents); 
                 else
                     
-                    wingaero=class_VLM_solver(aircraftma.grid,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference);
+                    wingaero=class_VLM_solver(aircraftma.grid,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference, aircraftma.control_surfaces_parents); 
                 end
                 %  wingaero=wingaero.f_set_state(state);
 
@@ -246,7 +246,7 @@ for l=1:lengthConf
                 Rigid_AerodataDamping_CoeffCmq(l,k,j,i)=Cq(5);
                 Rigid_AerodataDamping_CoeffCnq(l,k,j,i)=-Cq(6);
                 
-                % p derivatives
+                % r derivatives
                 Rigid_AerodataDamping_CoeffCXr(l,k,j,i)=-Cr(1);
                 Rigid_AerodataDamping_CoeffCYr(l,k,j,i)=Cr(2);
                 Rigid_AerodataDamping_CoeffCZr(l,k,j,i)=-Cr(3);
@@ -400,9 +400,9 @@ for l=1:lengthConf
                 beta=vecBeta(i)
                 state=class_aero_state(Uinf,alpha,beta,Ma,rho_air);
                 if deflected
-                    wingaero=class_VLM_solver(aircraftma.grid_deflected,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference);
+                    wingaero=class_VLM_solver(aircraftma.grid_deflected,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference, aircraftma.control_surfaces_parents); 
                 else
-                    wingaero=class_VLM_solver(aircraftma.grid,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference);
+                    wingaero=class_VLM_solver(aircraftma.grid,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference, aircraftma.control_surfaces_parents); 
                 end
                 % wingaero=wingaero.f_set_state(state);
                 %wingaero=wingaero.set_grid(aircraft.grid,aircraft.panels);
@@ -439,10 +439,10 @@ for l=1:lengthConf
                         if deflected
                             aircraftma=aircraftma.compute_grid();
                             aircraftma=aircraftma.compute_deflected_grid(def);
-                            wingaero=class_VLM_solver(aircraftma.grid_deflected,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference);
+                            wingaero=class_VLM_solver(aircraftma.grid_deflected,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference, aircraftma.control_surfaces_parents); 
                         else
                             aircraftma=aircraftma.compute_grid();
-                            wingaero=class_VLM_solver(aircraftma.grid,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference);
+                            wingaero=class_VLM_solver(aircraftma.grid,aircraftma.te_idx,aircraftma.panels,state,aircraftma.reference, aircraftma.control_surfaces_parents); 
                         end
                         wingaero=wingaero.f_solve_std();
                         if drag==0

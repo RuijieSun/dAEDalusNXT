@@ -27,7 +27,7 @@ Lz=[cos(c) sin(c)   0
     -sin(c) cos(c)  0
     0           0   1];
 
-L=Lz*Ly*Lx;
+L=Ly*Lz*Lx;
 
 Z=zeros(3);
 

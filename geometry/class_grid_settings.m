@@ -11,7 +11,8 @@ classdef class_grid_settings
     
     properties
         dy_max_struct_grid=0.5;
-        
+        % force a minimum panel number in chord direction
+        n_x_min=1;
         x_max_grid_size=0.5;
         y_max_grid_size=0.5;
         aerodynamic_fuselage=0;

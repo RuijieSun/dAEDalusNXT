@@ -13,14 +13,15 @@ classdef class_UVLM_LPVKernel
     
     properties
         linSSM
-        a
-        b
-        c
-        d
-        cF
-        cF2
-        dF
-        dF2
+        a0
+        b0
+        c0
+        d0
+        dadV
+        dbdV
+        dcdV
+        dddV
+        
         inputNames
         InputGroup
         outputNames
@@ -73,13 +74,16 @@ classdef class_UVLM_LPVKernel
             %K6 is transport within rest wake
 %             K6=([zeros(nS,nWR) ;eye(nWR-nS) zeros(nWR-nS,nS)]-blkdiag(eye(nWR-nS),eye(nS)))*Vref/xW;
 %             K6(end-nS+1:end,:)=K6(end-nS+1:end,:)*2701;
+            if solver.settings.nFixedWakePanels>solver.n_step-2
+                solver.settings.nFixedWakePanels=solver.n_step-2;
+            end
             dXVec=[ones(1,solver.settings.nFixedWakePanels) solver.settings.wakeGrowthFactor.^(1:solver.n_step-2-solver.settings.nFixedWakePanels) solver.settings.wakeGrowthFactor.^(solver.n_step+1-2-solver.settings.nFixedWakePanels)+solver.settings.addLengthFactorLastPanel/solver.settings.wakelength_factor*solver.n_step];
             dXVec2=(((dXVec(2:end)+dXVec(1:end-1))/2));
 %             dXVec2(1:end-1)=1;
-            K6=([zeros(nS,nWR) ;diag(repelem(1./dXVec2,nS)) zeros(nWR-nS,nS)]-blkdiag(eye(nS),diag(repelem(1./dXVec2,nS))))*Vref/xW;
+            K6=([zeros(nS,nWR) ;diag(repelem(1./dXVec2,nS)) zeros(nWR-nS,nS)]-blkdiag(eye(nS),diag(repelem(1./dXVec2,nS))))*Vref/xW*solver.Ma_corr;
 %             K6=([zeros(nS,nWR) ;eye(nWR-nS) zeros(nWR-nS,nS)]-blkdiag(eye(nWR-nS),eye(nS)))*Vref/xW;
             %K7 is transport within first wake row
-            K7=[eye(nS); zeros(nWR-nS,nS)]*Vref/xW;
+            K7=[eye(nS); zeros(nWR-nS,nS)]*Vref/xW*solver.Ma_corr;
             %% Assembly
             K8=+K6+K7*(K5-K4*K1^-1*K2)^-1*K4*K1^-1*K3;
             K9=K7*(K5-K4*K1^-1*K2)^-1*K4*K1^-1;
@@ -98,19 +102,27 @@ classdef class_UVLM_LPVKernel
             L10=(M1Y-M2Y*K5^-1*K4)*L4;
             L11=(M1Z-M2Z*K5^-1*K4)*L3+M3Z;
             L12=(M1Z-M2Z*K5^-1*K4)*L4;
-            %% Storage of Matrices
-            obj.a=K8;
-            obj.b=[K9 zeros(nWR,nB)];
-            obj.c=[L1*L3; L2*L5; L7; L9; L11];
-            obj.d=[L1*L4 zeros(nB,nB); L2*L6 L2*L4; L8 zeros(nB,nB); L10 zeros(nB,nB); L12 zeros(nB,nB)];
+            %% Storage of Matrices 
+            % a and b are linear functions of V
+            obj.dadV=sparse(K8);
+            obj.a0=sparse(0*K8);
+            obj.dbdV=sparse([K9 zeros(nWR,nB)]);
+            obj.b0=sparse(0*obj.dbdV);
+            c=sparse([L1*L3; L2*L5; L7; L9; L11]);
+            d=sparse([L1*L4 zeros(nB,nB); L2*L6 L2*L4; L8 zeros(nB,nB); L10 zeros(nB,nB); L12 zeros(nB,nB)]);
            
-            nB=size(obj.c,1)/5;
-            nStates=size(obj.a,1);
-            %define lpv factors for C and D matrix
-            obj.cF=[zeros(nB,nStates); ones(nB,nStates); zeros(3*nB,nStates)];
-            obj.cF2=(obj.cF==0);
-            obj.dF=[zeros(nB) zeros(nB); ones(nB) zeros(nB); zeros(3*nB,2*nB)];
-            obj.dF2=(obj.dF==0);
+            nB=size(c,1)/5;
+            nStates=size(obj.a0,1);
+            %define lpv factors for C and D matrix Cv=C*(CF*V+CF2) Dv=D*(DF*V+DF2) 
+            cF=sparse([zeros(nB,nStates); ones(nB,nStates); zeros(3*nB,nStates)]);
+            cF2=sparse((cF==0));
+            dF=sparse([zeros(nB) zeros(nB); ones(nB) zeros(nB); zeros(3*nB,2*nB)]);
+            dF2=sparse((dF==0));
+            obj.c0=c.*cF2;
+            obj.dcdV=c.*cF;
+            obj.d0=d.*dF2;
+            obj.dddV=d.*dF;
+            
             %% Storage of Names (Inputs, Outputs, States)
             obj.inputNames=[cellstr([repmat('b_',nB,1) num2str([1:nB]','%04d')]); cellstr([repmat('bDot_',nB,1) num2str([1:nB]','%04d')]);];
             obj.stateNames=[cellstr([repmat('wakeVort_',nWR,1) num2str([1:nWR]','%04d')]);];

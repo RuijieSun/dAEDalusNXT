@@ -15,8 +15,11 @@
 
 function pylon = f_calc_mass(pylon,weights)
     
-    disp('            performing eigenmass calculation');
-   m_total=0;
+    observer = 0;
+    if observer
+		disp('            performing eigenmass calculation');
+	end
+    m_total=0;
     for i=1:1:pylon.nel
          le=pylon.beamelement(i).le;
         el_m_sum=pylon.beamelement(i).el_m_sys+pylon.beamelement(i).el_m_s+pylon.beamelement(i).el_m_p;

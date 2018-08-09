@@ -140,6 +140,8 @@ classdef class_beam < matlab.mixin.Heterogeneous
         %> flag identifying symmetric structure
         is_sym;
         
+        %> flag stating whether anisotropic materials are present
+        anisotropic;
         %% general values
         
         %> structural mass
@@ -186,17 +188,21 @@ classdef class_beam < matlab.mixin.Heterogeneous
         %>
         %> @param nel number of beam elements
         %> @param crosssection string with type of crosssection of beam
+        %> @param anisotropic flag, should be set to 1 if the beam is
+        %> is made up of anisotropic materials, and 0 if isotropic
+        %> 
         %> @param varargin string containing beam name
         %>
         %> @return instance of the class_beam
         % =================================================================
-         function obj = class_beam(nel, crosssections, varargin)
+         function obj = class_beam(nel, crosssections, anisotropic_flag, varargin)
              %set identifier if passed to function
              if ~isempty(varargin)
                 obj.identifier=cell2mat(varargin{1});
              end
              
              %initalize variables
+             obj.anisotropic = anisotropic_flag;
              obj.nel = nel;
              obj.ndof=obj.el_ndof*(obj.nel+1);
              
@@ -218,12 +224,31 @@ classdef class_beam < matlab.mixin.Heterogeneous
              % differentiate later
              if ischar(crosssections)
                  for i=1:obj.nel
-                     beamelement(i) = class_beamelement(crosssections, obj);
+                     
+                     % checks whether the beam materials are anisotropic or
+                     % isotropic.
+                     
+                     % if the beam is anisotropic, the beam element
+                     % objects belong to the anisotropic version of the
+                     % beam element class (class_beamelement_anisotropic)
+                     if anisotropic_flag == 1
+                         beamelement(i) = class_beamelement_anisotropic(crosssections, obj);
+                         
+                     % if the beam is isotropic, the beam element
+                     % objects belong to the anisotropic version of the
+                     % beam element class (class_beamelement)
+                     else
+                         beamelement(i) = class_beamelement(crosssections, obj);
+                     end
                      beamelement(i).nodal_deflections_loc = zeros(2*obj.el_ndof,1); 
                  end
              else
                  for i=1:obj.nel
-                     beamelement(i) = class_beamelement(crosssections(i), obj);
+                     if anisotropic_flag == 1
+                         beamelement(i) = class_beamelement_anisotropic(crosssections(i), obj);
+                     else
+                         beamelement(i) = class_beamelement(crosssections(i), obj);
+                     end
                      beamelement(i).nodal_deflections_loc = zeros(2*obj.el_ndof,1); 
                  end
              end
@@ -301,6 +326,28 @@ classdef class_beam < matlab.mixin.Heterogeneous
              end
          end
          
+         
+         % Function used to recover shell strain and stresses from the
+         % Euler Bernoulli beam displacements (using the cross sectional
+         % modeller)
+         function obj = f_calc_stress_strain_crossmod(obj)
+             ndof_node=obj.el_ndof;
+             % loops through all beam elements
+             for i = 1:length(obj.beamelement)
+                 
+                 % saves nodal deflections of start and end node of current
+                 % beam element
+                 if isa(obj, 'class_wing')
+                    loc_nodal_deflection_input = obj.beamelement(i).nodal_deflections_loc;
+                 elseif isa(obj, 'class_beam')
+                    loc_nodal_deflection_input = obj.nodal_deflections(1 + ndof_node*(i-1): ndof_node*(i+1));
+                 end
+
+                 % calls the f_calc_stress_strain_crossmod at beam-element level
+                 obj.beamelement(i) = obj.beamelement(i).f_calc_stress_strain_crossmod(loc_nodal_deflection_input,ndof_node);
+                 
+             end
+         end
          
          
          function obj=f_update_node_coords(obj)
@@ -417,7 +464,19 @@ classdef class_beam < matlab.mixin.Heterogeneous
 %             end
             obj.modefrequencies = (1./sqrt(diag(omega2)))/(2*pi); % Since inverse iteration is used in determining matrix A
 
-         end
+        end
+         
+        % loops over all beam elements in order to save their respective
+        % nodal deflections within each specfic beam-element class instance
+        % (after solving the linear system, the solution used to only be
+        % stored within the beam object, not the beam-element objects)
+        function obj = f_save_nodal_defl_loc(obj)
+            for i = 1:obj.nel
+                obj.beamelement(i).nodal_deflections_loc = obj.nodal_deflections((i*6)+1:((i+2)*6));
+            end
+        end
+        
+        
         % =================================================================
         %> @brief performs self structural design based on the input loads
         %>
@@ -501,7 +560,7 @@ classdef class_beam < matlab.mixin.Heterogeneous
             for bi=4:6:length(b)-1
                 b_Hat_Skew(bi:bi+2,1:3)=eye(3,3);   % 3x3 identity matrix
             end
-            Inertia=b_Hat_Skew'*obj.Mff_lumped*b_Hat_Skew;
+            Inertia=b_Hat_Skew'*obj.M_lumped*b_Hat_Skew;
          
          end
          
@@ -629,7 +688,76 @@ classdef class_beam < matlab.mixin.Heterogeneous
             %plot3(wing.node_coords(:,1),wing.node_coords(:,2),wing.node_coords(:,3),'-x','LineWidth',2)
             %plot3(engine.cgpos(1),engine.cgpos(2),engine.cgpos(3),'c+');
             %plot3(gear.pos(1),gear.pos(2),gear.pos(3),'go');
+          end
+         
+          % Function used to plot the strains or stresses derived from the
+          % cross sectional modeller. The plotting style is similar to a 3D
+          % colored FEM plot.
+          
+          % inputs:
+          
+          % stress_flag (determines what data is plotted, see
+          % comments below)
+          
+          % dof_interest(determines to which DOF belongs
+          % the stress or strain plotted, does not apply to von mises)
+         function obj = f_plot_crossmod_data(obj, stress_flag, dof_interest)
+                        
+            figure;
+            axis('equal');
+            xlabel('X axis (FLAP)');
+            ylabel('Y axis (TORSION)');
+            zlabel('Z axis (LAG)');
+            
+            % value_flag==0: strain, value_flag==1: stress, value_flag==2: von mises stresses
+            
+            % Checks what data we are interested in. Makes an array of the
+            % desired data reading all beam-elements. Proceeds to pick the
+            % maximum and minimum value from the data array. This is done
+            % to make sure that the plot's color scale maps all possible
+            % values.
+            
+            if stress_flag==0
+                strain = [];
+                for i=1:length(obj.beamelement)
+%                     crs = obj.beamelement(i).crosssection;
+%                     strain = [strain,crs.strain_fs(dof_interest,:)', crs.strain_rs(dof_interest,:)', crs.strain_sk_up(dof_interest,:)', crs.strain_sk_lo(dof_interest,:)'];
+                    strain = [strain, obj.beamelement(i).element_strain_crossmod(dof_interest:6:end)'];
+                end
+                caxis([min(strain), max(strain)]);
+            
+            elseif stress_flag==1
+                stress = [];
+                for i=1:length(obj.beamelement)
+%                     crs = obj.beamelement(i).crosssection;
+%                     stress = [stress,crs.strain_fs(dof_interest,:)', crs.strain_rs(dof_interest,:)', crs.strain_sk_up(dof_interest,:)', crs.strain_sk_lo(dof_interest,:)'];
+                     stress = [stress, obj.beamelement(i).element_stress_crossmod(dof_interest:6:end)'];
+                end
+                caxis([min(stress), max(stress)]);
+                
+            elseif stress_flag==2
+                stress_von_mis = [];
+                for i=1:length(obj.beamelement)
+%                     crs = obj.beamelement(i).crosssection;
+%                     stress = [stress,crs.strain_fs(dof_interest,:)', crs.strain_rs(dof_interest,:)', crs.strain_sk_up(dof_interest,:)', crs.strain_sk_lo(dof_interest,:)'];
+                     stress_von_mis = [stress_von_mis, obj.beamelement(i).element_stress_von_mis_crossmod'];
+                end
+                caxis([min(stress_von_mis), max(stress_von_mis)]);
+            end
+            
+            hold on;
+            
+            % calls plotting function at beam-element level
+            for i=1:length(obj.beamelement)
+               obj.beamelement(i).f_plot_crossmod_data(obj.node_coords(:,i), obj.node_coords(:,i+1), stress_flag, dof_interest);
+            end
+            
+            hold off;
+            
+            % adds the color bar to the plot
+            colorbar;
          end
+         
          
          % ================================================================
          %> @brief plot geometry of beam

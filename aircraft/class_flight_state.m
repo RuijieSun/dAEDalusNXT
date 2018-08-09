@@ -44,7 +44,26 @@ classdef class_flight_state
         % body states
         
         reference;
-
+        % mla surfaces (array of names)
+        mlaSurf;
+        % mla setting - if not empty, no mla optimization is run and the
+        % mlaVal value is used 
+        mlaVal;
+        % mla upper bounds
+        mlaUB;
+        % mla lower bounds
+        mlaLB;
+        % mla deflection symmetry (e.g. deflect aileron symmetrically)
+        mlaSymDefl;
+        %deformation state (used for optimization, stored within iterations
+        %to speed up convergence)
+        def;
+        % gla surfaces (array of names)
+        glaSurf;
+        % mla upper bounds
+        glaUB;
+        % mla lower bounds
+        glaLB;        
     end
     
     methods

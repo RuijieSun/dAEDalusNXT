@@ -18,7 +18,7 @@ function [obj] = f_postprocess(obj)
 
     %compute reaction forces for each node
     obj.reaction_forces=obj.K*obj.nodal_deflections-obj.Q;
-    obj.node_loadings=obj.reaction_forces;
+    obj.node_loadings=0*obj.reaction_forces;
     obj.node_loadings_loc=zeros(length(obj.reaction_forces),1);
     %obj.node_loadings(1:6)=obj.reaction_forces(1:6);
     el_ndof=obj.el_ndof;
@@ -29,19 +29,27 @@ function [obj] = f_postprocess(obj)
     	for i=1:obj.nel-1
         	el_load=obj.beamelement(i).elKglobal*obj.nodal_deflections(k:k+2*el_ndof-1);
         	
-        	el_loadnxt=obj.beamelement(i+1).elKglobal*obj.nodal_deflections(k+el_ndof:k+3*el_ndof-1);
-        	obj.node_loadings(k:k+el_ndof-1)=el_load(1:el_ndof);
+        	el_load_nxt=obj.beamelement(i+1).elKglobal*obj.nodal_deflections(k+el_ndof:k+3*el_ndof-1);
+%         	obj.node_loadings(k:k+el_ndof-1)=el_load(1:el_ndof);
         	if(el_ndof==6)
             	el_load_loc=obj.beamelement(i).T*el_load;
-            	el_load_loc2=obj.beamelement(i+1).T*el_loadnxt;
+            	el_load_loc_nxt=obj.beamelement(i+1).T*el_load_nxt;
             	if i==1
-            	    obj.node_loadings_loc(k:k+el_ndof-1)=el_load_loc(1:el_ndof);%+el_load_loc2(1:el_ndof)*0.5;
-            	    obj.node_loadings_loc(k+el_ndof:k+2*el_ndof-1)=-el_load_loc(el_ndof+1:2*el_ndof)*0.5+el_load_loc2(1:el_ndof)*0.5;
+            	    obj.node_loadings_loc(k:k+el_ndof-1)=el_load_loc(1:el_ndof);%+el_load_loc_nxt(1:el_ndof)*0.5;
+            	    obj.node_loadings_loc(k+el_ndof:k+2*el_ndof-1)=-el_load_loc(el_ndof+1:2*el_ndof)*0.5+el_load_loc_nxt(1:el_ndof)*0.5;
+                    
+            	    obj.node_loadings(k:k+el_ndof-1)=el_load(1:el_ndof);
+            	    obj.node_loadings(k+el_ndof:k+2*el_ndof-1)=-el_load(el_ndof+1:2*el_ndof)*0.5+el_load_nxt(1:el_ndof)*0.5;
             	elseif i==obj.nel-1
-            	    obj.node_loadings_loc(k+2*el_ndof:k+3*el_ndof-1)=-el_load_loc2(el_ndof+1:2*el_ndof);%+el_load_loc2(1:el_ndof)*0.5;
-            	    obj.node_loadings_loc(k+el_ndof:k+2*el_ndof-1)=-el_load_loc(el_ndof+1:2*el_ndof)*0.5+el_load_loc2(1:el_ndof)*0.5;%+el_load_loc2(1:el_ndof)*0.5;
+            	    obj.node_loadings_loc(k+2*el_ndof:k+3*el_ndof-1)=-el_load_loc_nxt(el_ndof+1:2*el_ndof);%+el_load_loc_nxt(1:el_ndof)*0.5;
+            	    obj.node_loadings_loc(k+el_ndof:k+2*el_ndof-1)=-el_load_loc(el_ndof+1:2*el_ndof)*0.5+el_load_loc_nxt(1:el_ndof)*0.5;%+el_load_loc_nxt(1:el_ndof)*0.5;
+                    
+            	    obj.node_loadings(k+2*el_ndof:k+3*el_ndof-1)=-el_load_nxt(el_ndof+1:2*el_ndof);
+            	    obj.node_loadings(k+el_ndof:k+2*el_ndof-1)=-el_load(el_ndof+1:2*el_ndof)*0.5+el_load_nxt(1:el_ndof)*0.5;
             	else
-            	    obj.node_loadings_loc(k+el_ndof:k+2*el_ndof-1)=-el_load_loc(el_ndof+1:2*el_ndof)*0.5+el_load_loc2(1:el_ndof)*0.5;%+el_load_loc2(1:el_ndof)*0.5;
+            	    obj.node_loadings_loc(k+el_ndof:k+2*el_ndof-1)=-el_load_loc(el_ndof+1:2*el_ndof)*0.5+el_load_loc_nxt(1:el_ndof)*0.5;%+el_load_loc_nxt(1:el_ndof)*0.5;
+                    
+            	    obj.node_loadings(k+el_ndof:k+2*el_ndof-1)=-el_load(el_ndof+1:2*el_ndof)*0.5+el_load_nxt(1:el_ndof)*0.5;
             	end
         	end
         	k=k+el_ndof;
@@ -56,11 +64,15 @@ function [obj] = f_postprocess(obj)
         if k==1
             T=obj.beamelement(k).T(1:6,1:6);
             obj.nodal_deflections_loc((k-1)*el_ndof+1:(k-1)*el_ndof+6)=T*obj.nodal_deflections((k-1)*el_ndof+1:(k-1)*el_ndof+6);
+            nodal_deflections_loc_next_node = T*obj.nodal_deflections((k)*el_ndof+1:(k)*el_ndof+6);
+            obj.beamelement(k).nodal_deflections_loc = [obj.nodal_deflections_loc((k-1)*el_ndof+1:(k-1)*el_ndof+6); nodal_deflections_loc_next_node];
             rot=obj.nodal_deflections((k-1)*el_ndof+4:(k-1)*el_ndof+6);
             Theta_re=T(1:3,1:3)*[0 ;obj.epsilon(k)*0; 0]; 
         elseif k<=obj.nel
             T=obj.beamelement(k).T(1:6,1:6);
             obj.nodal_deflections_loc((k-1)*el_ndof+1:(k-1)*el_ndof+6)=T*obj.nodal_deflections((k-1)*el_ndof+1:(k-1)*el_ndof+6);
+            nodal_deflections_loc_next_node = T*obj.nodal_deflections((k)*el_ndof+1:(k)*el_ndof+6);
+            obj.beamelement(k).nodal_deflections_loc = [obj.nodal_deflections_loc((k-1)*el_ndof+1:(k-1)*el_ndof+6); nodal_deflections_loc_next_node];
             rot=obj.nodal_deflections((k-1)*el_ndof+4:(k-1)*el_ndof+6);
             Theta_re=T(1:3,1:3)*[0 ;obj.epsilon(k)*0; 0];
         else
@@ -88,6 +100,12 @@ function [obj] = f_postprocess(obj)
         obj.nodal_deflections_c4((k-1)*el_ndof+1:(k-1)*el_ndof+3)=obj.nodal_deflections((k-1)*el_ndof+1:(k-1)*el_ndof+3)+delta_twist;
         % obj.nodal_deflections_c4((k-1)*el_ndof+1:(k-1)*el_ndof+3)=obj.nodal_deflections((k-1)*el_ndof+1:(k-1)*el_ndof+3)+(M*diff'-diff');
     end
+    
+    
+    
+%     if obj.anisotropic == 1
+%        obj = obj.f_calc_stress_strain_crossmod(); 
+%     end
     %add nodal load later!
     %obj.node_loadings(k:k+el_ndof-1)=[0,0,0,0,0,0];
 end

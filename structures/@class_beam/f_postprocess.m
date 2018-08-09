@@ -33,6 +33,10 @@ function [obj] = f_postprocess(obj)
     obj.node_loadings(k:k+el_ndof-1)=-obj.reaction_forces(k:k+el_ndof-1);
     obj.node_loadings_loc(k:k+el_ndof-1)=-obj.beamelement(end).T(1:el_ndof,1:el_ndof)*obj.reaction_forces(k:k+el_ndof-1);
     
+    if obj.anisotropic == 1
+       obj = obj.f_calc_stress_strain_crossmod(el_ndof); 
+    end
+    
     %add nodal load later!
     %obj.node_loadings(k:k+el_ndof-1)=[0,0,0,0,0,0];
 end

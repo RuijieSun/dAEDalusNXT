@@ -128,7 +128,7 @@ classdef class_fuselagesegment
                     isExternalFEM = 0;
                 case 2
                     n=varargin{1};
-                    obj.n_circ=18;
+                    obj.n_circ=36;
                     isExternalFEM = 0;
                 case 3
                     n=varargin{1};

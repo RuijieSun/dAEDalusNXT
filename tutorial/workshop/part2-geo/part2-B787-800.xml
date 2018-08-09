@@ -1,0 +1,517 @@
+<daedalus>
+<aircraft name="B787-800" >
+     <reference>
+        <area>330</area>
+        <length>6.50</length>
+		<span>58.67</span>
+        <point>
+             <x>27.16</x>
+             <y>0.0</y>
+             <z>0.0</z>
+        </point>
+    </reference>
+	<wings>
+		<wing name="MainWing" symmetric="1">
+			<segment ID="1">
+				<location>
+					<x>22</x>
+					<y>0</y>
+					<z>-.25</z>
+				</location>
+				<dihedral>7</dihedral>
+				<le_sweep>0</le_sweep>
+				<span>2.87</span>
+				<root_chord>12.5</root_chord>
+				<tip_chord>12.5</tip_chord>
+				<root_twist>0</root_twist>
+				<tip_twist>3</tip_twist>
+				<root_profile>NACA0012</root_profile>
+				<tip_profile>NACA0012</tip_profile>
+				<wingbox type="StandardWingbox">
+					<root_frontspar> 0.12 </root_frontspar>
+					<tip_frontspar> 0.12 </tip_frontspar>
+					<root_rearspar> 0.55 </root_rearspar>
+					<tip_rearspar> 0.55 </tip_rearspar>
+					<is_fueled > 1 </is_fueled>
+					<material type="aluminum" ></material>
+				</wingbox>  
+			</segment>
+			<segment ID="2">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+				<dihedral>7</dihedral>
+				<le_sweep>34.6</le_sweep>
+				<span>3.43</span>
+				<root_chord>12.5</root_chord>
+				<tip_chord>10.1</tip_chord>
+				<root_twist>3</root_twist>
+				<tip_twist>2.72</tip_twist>
+				<root_profile>NACA0012</root_profile>
+				<tip_profile>NACA0012</tip_profile>
+				<control_surface name="innerFlap1" location="trailing_edge">
+					<hingeline type="tapered">0.15</hingeline>
+					<starts>0</starts>
+					<ends>1</ends>
+				</control_surface>
+				<control_surface name="spoiler1" location="center_wing" deflection="symmetric">
+					<hingeline type="constant"> 0.10 </hingeline>
+					<starts>0.15</starts>
+					<ends>1</ends>
+					<xsi_LE_inner>0.805</xsi_LE_inner>
+					<xsi_LE_outer>0.77</xsi_LE_outer>
+				</control_surface>
+				<control_surface name="slat1" location="leading_edge" deflection="symmetric">
+					<hingeline type="tapered"> 0.10 </hingeline>
+					<starts>0.15</starts>
+					<ends>1</ends>
+				</control_surface>
+				<wingbox type="StandardWingbox">
+					<root_frontspar> 0.12 </root_frontspar>
+					<tip_frontspar> 0.14 </tip_frontspar>
+					<root_rearspar> 0.55 </root_rearspar>
+					<tip_rearspar> 0.64 </tip_rearspar>
+					<is_fueled> 1 </is_fueled>
+					<material type="aluminum" ></material>
+				</wingbox>  
+			</segment>
+			<segment ID="3">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+				<dihedral>7</dihedral>
+				<le_sweep>34.6</le_sweep>
+				<span>4.824</span>
+				<root_chord>10.1</root_chord>
+				<tip_chord>6.72</tip_chord>
+				<root_twist>2.72</root_twist>
+				<tip_twist>2</tip_twist>
+				<root_profile>NACA0012</root_profile>
+				<tip_profile>NACA0012</tip_profile>
+				<control_surface name="innerFlap2" location="trailing_edge">
+					<hingeline type="tapered">0.15</hingeline>
+					<starts>0</starts>
+					<ends>1</ends>
+				</control_surface>
+				<control_surface name="spoiler2" location="center_wing" deflection="symmetric">
+					<hingeline type="constant"> 0.12 </hingeline>
+					<starts>0</starts>
+					<ends>0.56</ends>
+					<xsi_LE_inner>0.77</xsi_LE_inner>
+					<xsi_LE_outer>0.725</xsi_LE_outer>
+				</control_surface>
+				<control_surface name="slat2" location="leading_edge" deflection="symmetric">
+					<hingeline type="tapered"> 0.10 </hingeline>
+					<starts>0</starts>
+					<ends>0.56</ends>
+				</control_surface>
+				<wingbox type="StandardWingbox">
+					<root_frontspar> 0.14 </root_frontspar>
+					<tip_frontspar> 0.14 </tip_frontspar>
+					<root_rearspar> 0.64 </root_rearspar>
+					<tip_rearspar> 0.64 </tip_rearspar>
+					<is_fueled> 1 </is_fueled>
+					<material type="aluminum" ></material>
+				</wingbox>  
+			</segment>			
+			<segment ID="4">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+				<dihedral>7</dihedral>
+				<le_sweep>34.6</le_sweep>
+				<span>10.95</span>
+				<root_chord>6.72</root_chord>
+				<tip_chord>3.89</tip_chord>
+				<root_twist>2</root_twist>
+				<tip_twist>0.42</tip_twist>
+				<root_profile>NACA0012</root_profile>
+				<tip_profile>NACA0012</tip_profile>
+				<control_surface name="spoiler3" location="center_wing" deflection="symmetric">
+					<hingeline type="constant"> 0.15 </hingeline>
+					<starts>0.0</starts>
+					<ends>.83</ends>
+					<xsi_LE_inner>0.72</xsi_LE_inner>
+					<xsi_LE_outer>0.58</xsi_LE_outer>
+				</control_surface>
+				<control_surface name="outerFlap" location="trailing_edge">
+					<hingeline type="constant">0.15</hingeline>
+					<starts>0</starts>
+					<ends>1</ends>
+				</control_surface>
+				<control_surface name="slat3" location="leading_edge" deflection="symmetric">
+					<hingeline type="tapered"> 0.15 </hingeline>
+					<starts>0</starts>
+					<ends>1</ends>
+				</control_surface>
+				<wingbox type="StandardWingbox">
+					<root_frontspar> 0.14 </root_frontspar>
+					<tip_frontspar> 0.18 </tip_frontspar>
+					<root_rearspar> 0.64 </root_rearspar>
+					<tip_rearspar> 0.60 </tip_rearspar>
+					<is_fueled> 1 </is_fueled>
+					<material type="aluminum" ></material>
+				</wingbox>
+			</segment>
+			<segment ID="5">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+				<dihedral>7</dihedral>
+				<le_sweep>34.6</le_sweep>
+				<span>2.53</span>
+				<root_chord>3.89</root_chord>
+				<tip_chord>3.24</tip_chord>
+				<root_twist>0.42</root_twist>
+				<tip_twist>-0.34</tip_twist>
+				<root_profile>NACA0012</root_profile>
+				<tip_profile>NACA0012</tip_profile>
+				<control_surface name="aileron1" location="trailing_edge">
+					<hingeline type="tapered">0.20</hingeline>
+					<starts>0</starts>
+					<ends>1</ends>
+				</control_surface>
+				<control_surface name="slat4" location="leading_edge" deflection="symmetric">
+					<hingeline type="tapered"> 0.15 </hingeline>
+					<starts>0</starts>
+					<ends>1</ends>
+				</control_surface>
+				<wingbox type="StandardWingbox">
+					<root_frontspar> 0.18 </root_frontspar>
+					<tip_frontspar> 0.18 </tip_frontspar>
+					<root_rearspar> 0.60 </root_rearspar>
+					<tip_rearspar> 0.60 </tip_rearspar>
+					<is_fueled> 1 </is_fueled>
+					<material type="aluminum" ></material>
+				</wingbox>
+			</segment>
+			<segment ID="6">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+				<dihedral>7</dihedral>
+				<le_sweep>34.6</le_sweep>
+				<span>3.37</span>
+				<root_chord>3.24</root_chord>
+				<tip_chord>2.37</tip_chord>
+				<root_twist>-0.34</root_twist>
+				<tip_twist>-2</tip_twist>
+				<root_profile>NACA0012</root_profile>
+				<tip_profile>NACA0012</tip_profile>
+				<control_surface name="aileron2" location="trailing_edge">
+					<hingeline type="constant">0.21</hingeline>
+					<starts>0</starts>
+					<ends>0.7</ends>
+				</control_surface>
+				<control_surface name="slat5" location="leading_edge" deflection="symmetric">
+					<hingeline type="tapered"> 0.15 </hingeline>
+					<starts>0</starts>
+					<ends>0.8</ends>
+				</control_surface>
+				<wingbox type="StandardWingbox">
+					<root_frontspar> 0.18 </root_frontspar>
+					<tip_frontspar> 0.18 </tip_frontspar>
+					<root_rearspar> 0.60 </root_rearspar>
+					<tip_rearspar> 0.60 </tip_rearspar>
+					<is_fueled> 1 </is_fueled>
+					<material type="aluminum" ></material>
+				</wingbox>
+			</segment>
+			<segment ID="7">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+				<dihedral>15</dihedral>
+				<le_sweep>56</le_sweep>
+				<span>2.12</span>
+				<root_chord>2.37</root_chord>
+				<tip_chord>1</tip_chord>
+				<root_twist>-2</root_twist>
+				<tip_twist>-2</tip_twist>
+				<root_profile>NACA0012</root_profile>
+				<tip_profile>NACA0012</tip_profile>
+				<wingbox type="StandardWingbox">
+					<root_frontspar> 0.18 </root_frontspar>
+					<tip_frontspar> 0.18 </tip_frontspar>
+					<root_rearspar> 0.60 </root_rearspar>
+					<tip_rearspar> 0.60 </tip_rearspar>
+					<is_fueled> 0 </is_fueled>
+					<material type="anisotropic" ></material>
+				</wingbox>  
+			</segment>
+		</wing>
+		<wing name="HorizontalTail" symmetric="1">
+			<segment ID="1">
+				<location>
+					<x>48.5</x>
+					<y>0</y>
+					<z>1.1</z>
+				</location>
+				<dihedral>10</dihedral>
+				<le_sweep>41.25</le_sweep>
+				<span>9.65</span>
+				<root_chord>6.62</root_chord>
+				<tip_chord>1.56</tip_chord>
+				<root_twist>0</root_twist>
+				<tip_twist>0</tip_twist>
+				<root_profile>NACA0012</root_profile>
+				<tip_profile>NACA0012</tip_profile>
+				<control_surface name="elevator" location="trailing_edge">
+					<hingeline type="tapered">0.33</hingeline>
+					<starts>0.1</starts>
+					<ends>0.95</ends>
+				</control_surface>
+				<wingbox type="StandardWingbox">
+					<root_frontspar> 0.15 </root_frontspar>
+					<tip_frontspar> 0.15 </tip_frontspar>
+					<root_rearspar> 0.67 </root_rearspar>
+					<tip_rearspar> 0.67 </tip_rearspar>
+					<is_fueled> 1 </is_fueled>
+					<material type="aluminum" > </material>
+				</wingbox>  
+			</segment>
+		</wing>
+		<wing name="VerticalTail" symmetric="0">
+			<segment ID="1">
+				<location>
+					<x>45.7</x>
+					<y>0</y>
+					<z>1.5</z>
+				</location>
+				<dihedral>90</dihedral>
+				<le_sweep>44.1</le_sweep>
+				<span>10.82</span>
+				<root_chord>9.09</root_chord>
+				<tip_chord>2.66</tip_chord>
+				<root_twist>0</root_twist>
+				<tip_twist>0</tip_twist>
+				<root_profile>NACA0012</root_profile>
+				<tip_profile>NACA0012</tip_profile>
+				<control_surface name="rudder" location="trailing_edge">
+					<hingeline type="tapered">0.37</hingeline>
+					<starts>0.1</starts>
+					<ends>1</ends>	
+				</control_surface>	
+				<wingbox type="StandardWingbox">
+					<root_frontspar> 0.15 </root_frontspar>
+					<tip_frontspar> 0.15 </tip_frontspar>
+					<root_rearspar> 0.7 </root_rearspar>
+					<tip_rearspar> 0.7 </tip_rearspar>
+					<is_fueled> 0 </is_fueled>
+					<material type="aluminum" > </material>
+				</wingbox>  
+			</segment>
+		</wing>
+	</wings>
+	<fuselages>
+		<fuselage name="Fuselage">
+			<segment name="Nose">
+				<location>
+					<x>0</x>
+					<y>0</y>
+					<z>0</z>
+				</location>
+				<length>8.67</length>
+				<front_width>0.1</front_width>
+				<rear_width>2.87</rear_width>
+				<front_height>0.1</front_height>
+				<rear_height>3.01</rear_height>
+				<sweep>-7</sweep>
+			</segment>
+			<segment name="Cabin">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+				<length>33.97</length>
+				<front_width>2.87</front_width>
+				<rear_width>2.87</rear_width>
+				<front_height>3.01</front_height>
+				<rear_height>3.01</rear_height>
+				<sweep>0</sweep>
+			</segment>
+			<segment name="Tail">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+				<length>14.06</length>
+				<front_width>2.87</front_width>
+				<rear_width>0.2</rear_width>
+				<front_height>3.01</front_height>
+				<rear_height>0.2</rear_height>
+				<sweep>-6</sweep>
+			</segment>
+		</fuselage>
+	</fuselages>
+    <nacelles>	
+        <fuselage name="Nacelle1">
+             <segment name="Nose">
+                <location>
+                    <x> 16.98</x>
+				    <y> -9.96</y>
+				    <z> -1.2</z>
+                </location>
+				<length>1</length>
+				<front_width>1.6</front_width>
+				<rear_width>2.03</rear_width>
+				<front_height>1.6</front_height>
+				<rear_height>2.03</rear_height>
+				<sweep>0</sweep>
+			</segment>
+			<segment name="Cabin">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+                <length>3</length>
+				<front_width>2.03</front_width>
+				<rear_width>2.03</rear_width>
+				<front_height>2.03</front_height>
+				<rear_height>2.03</rear_height>
+				<sweep>0</sweep>
+			</segment>
+			<segment name="Tail">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+                <length>2</length>
+				<front_width>2.03</front_width>
+				<rear_width>1.35</rear_width>
+				<front_height>2.03</front_height>
+				<rear_height>1.35</rear_height>
+				<sweep>0</sweep>
+			</segment>
+		</fuselage>
+        <fuselage name="Nacelle2">
+             <segment name="Nose">
+                <location>
+                    <x> 16.98</x>
+				    <y> 9.96</y>
+				    <z> -1.2</z>
+			    </location>
+                <length>1</length>
+				<front_width>1.6</front_width>
+				<rear_width>2.03</rear_width>
+				<front_height>1.6</front_height>
+				<rear_height>2.03</rear_height>
+				<sweep>0</sweep>
+			</segment>
+			<segment name="Cabin">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+                <length>3</length>
+				<front_width>2.03</front_width>
+				<rear_width>2.03</rear_width>
+				<front_height>2.03</front_height>
+				<rear_height>2.03</rear_height>
+				<sweep>0</sweep>
+			</segment>
+			<segment name="Tail">
+				<location>
+					<attach_to> previous </attach_to>
+				</location>
+                <length>2</length>
+				<front_width>2.03</front_width>
+				<rear_width>1.35</rear_width>
+				<front_height>2.03</front_height>
+				<rear_height>1.35</rear_height>
+				<sweep>0</sweep>
+			</segment>
+		</fuselage>
+    </nacelles>
+	<engines>
+		<engine name="left"  mounting="MainWing">
+			<cg_pos> 
+				<x> 22.7</x>
+				<y> 9.96</y>
+				<z> -1.2</z>
+			</cg_pos>
+			<mass_engine> 6200 </mass_engine>
+			<mass_pylon>  1500  </mass_pylon>
+			<max_thrust>  280000 </max_thrust>
+		</engine>
+		<engine name="right" mounting="MainWing">
+			<cg_pos> 
+				<x> 22.7 </x>
+				<y> -9.96 </y>
+				<z> -1.2</z>
+			</cg_pos>
+			<mass_engine> 6200 </mass_engine>
+			<mass_pylon>  1500  </mass_pylon>
+			<max_thrust>  280000 </max_thrust>
+		</engine>
+	</engines>
+	<weights>
+		<general_weights>
+			<MTOW unit="kg"> 228000 </MTOW>
+			<MZFW unit="kg"> 161000 </MZFW>
+			<MLW unit="kg">  172000 </MLW>
+			<OWE unit="kg">  118000 </OWE>
+		</general_weights>
+		<wing_weights>
+			<wing_weight name="MainWing">
+				<SystemsEstimate> 3000</SystemsEstimate>
+				<SkinEstimate> 3000</SkinEstimate>
+			</wing_weight>
+			<wing_weight name="VerticalTail">
+				<SystemsEstimate> 500</SystemsEstimate>
+				<SkinEstimate> 500</SkinEstimate>
+			</wing_weight>
+			<wing_weight name="HorizontalTail">
+				<SystemsEstimate> 250</SystemsEstimate>
+				<SkinEstimate> 250</SkinEstimate>
+			</wing_weight>
+		</wing_weights>
+		<fuselage_weights>
+			<fuselage_weight name="Fuselage">
+				<NonStructuralEstimate> 30000 </NonStructuralEstimate>
+				<SystemsEstimate> 35000 </SystemsEstimate>
+				<NumberPAX> 300</NumberPAX>
+			</fuselage_weight>
+		</fuselage_weights>
+	</weights>
+	<control>
+		<control_allocation>
+			<trim_surface name="elevator"> </trim_surface>
+			<pitch_cmd name="elevator">  </pitch_cmd>
+			<roll_cmd name="aileron">  </roll_cmd>
+			<yaw_cmd name="rudder">  </yaw_cmd>
+		</control_allocation>
+	</control>
+	<boundary_conditions>
+		<connection>
+			<beam name="MainWing"> </beam>
+			<beam name="Fuselage"> </beam>
+		</connection>
+        <connection>
+			<beam name="VerticalTail"> </beam>
+			<beam name="Fuselage"> </beam>
+		</connection>
+        <connection>
+			<beam name="HorizontalTail"> </beam>
+			<beam name="Fuselage"> </beam>
+		</connection>
+		<restraining>
+			<beam name="Fuselage">
+				<x>27.16</x>
+				<y>	0</y>
+				<z>	0</z>
+			</beam>
+		</restraining>
+	</boundary_conditions>
+	<specialsettings>
+		<wingbox_fueling_factor> 0.95 </wingbox_fueling_factor>
+		<wing_t_min_sk> 3e-3 </wing_t_min_sk>
+		<wing_t_min_sp> 3e-3 </wing_t_min_sp>
+        <skins_layup>
+            <ply_material> CFRP_standard </ply_material>
+            <layup_angles> 0 45 -45 90 </layup_angles>
+            <layup_fractions> 50 20 20 10  </layup_fractions>
+        </skins_layup>
+        <spars_layup>
+            <ply_material> CFRP_standard </ply_material>
+            <layup_angles> 45 -45 0 90 </layup_angles>
+            <layup_fractions> 40 40 10 10  </layup_fractions>
+        </spars_layup>
+	</specialsettings>
+</aircraft>
+</daedalus>

@@ -271,6 +271,10 @@ function obj=f_assemble_free(obj,loadstep,eval_nonlin)
             %                 obj.Ktest=K';
             %                 obj.Mtest=M'; % Mass Matrix test
        
-            
-            
+            if or(updateTotalK,updateTotalM)
+                obj.modeshapes=[];
+                obj.modefrequencies=[];
+                obj.modeshapes_lumped=[];
+                obj.modefrequencies_lumped=[];
+            end
         end

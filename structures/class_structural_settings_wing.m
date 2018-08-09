@@ -33,6 +33,16 @@ classdef class_structural_settings_wing
         fuel_density=807.5;                     % fuel density (Jet-A1)
         
         materials;
+        
+        % information used to discretize the cross section of each beam
+        % element into shell elements. One of the two should always be set
+        % to zero, so that the code will automatically use the other
+        % variable. The code DOES NOT check which condition is
+        % dominant.
+        
+        nr_nodes_crosssection_element;  % nr of nodes per skin/spar
+        ds_nodes_crosssection_element;  % max shell element width
+        
     end
     
     methods

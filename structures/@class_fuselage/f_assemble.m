@@ -68,9 +68,9 @@ function obj = f_assemble(obj,add_eigenmass,add_fuelmass,add_engineforces,add_ge
             obj.Mff_lumped = obj.externalFEM.Mext;
             obj.M_lumped = obj.externalFEM.Mext;
         end
-%         if any(any(obj.nodal_masses))
-%            obj=obj.f_add_nodal_masses();
-%         end
+        if any(any(obj.nodal_masses))
+           obj=obj.f_add_nodal_masses();
+        end
         obj.update_M=0;
     end
     

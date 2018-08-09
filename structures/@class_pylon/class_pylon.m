@@ -28,7 +28,15 @@ classdef class_pylon<class_beam
         
          function obj = class_pylon(nel,crosssection,varargin)
             %call class_beam constructor 
-            obj=obj@class_beam(nel,crosssection,varargin);
+            
+            % class_beam was changed in order to handle anisotropic
+            % materials and anisotropic beam-elements. This means that
+            % class_beam now requires an anisotropic_flag input. Since we
+            % are not planning to make the fuselage out of anisotropic
+            % materials, we are automatically setting that flag to zero
+            % (see input below), meaning that Daedalus will always handle
+            % the fuselage as an isotropic beam.
+            obj=obj@class_beam(nel,crosssection,0,varargin);
          end
          
          function struct_deflections=f_get_deflections(obj)

@@ -35,6 +35,8 @@ classdef class_UVLM_computation_settings
         
         modal_data;
         n_mode;
+        %indComp in SSM
+        indComp=0;
     end
     
     methods

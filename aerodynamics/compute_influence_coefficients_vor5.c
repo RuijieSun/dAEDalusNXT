@@ -148,34 +148,65 @@ void compute_influence_coefficients_vor5(double *grid,double *panels, double *co
                 coredist=sqrt(r1xr0_1*r1xr0_1+r1xr0_2*r1xr0_2+r1xr0_3*r1xr0_3)/norm_r0;
                 coredisti=sqrt(r1ixr0_1*r1ixr0_1+r1ixr0_2*r1ixr0_2+r1ixr0_3*r1ixr0_3)/norm_r0;
                  /*if  ( (!((normr1<=1E-5)||(normr2<=1E-5))) && coredist>1E-8)*/ 
-                if  ( (!((normr1<=1E-7)||(normr2<=1E-7))) && coredist>1E-7)
+                if (i<4 && i>0) 
                 {
-                    r1dr2_1=r11/normr1-r21/normr2;
-                    r1dr2_2=r12/normr1-r22/normr2;
-                    r1dr2_3=r13/normr1-r23/normr2;
-                    
-                    dotp_r0_r1dr2=r1dr2_1*r01+r1dr2_2*r02+r1dr2_3*r03;
-                    
-                    wAB_1=wAB_1-r1xr2_1/(norm_r1xr2*norm_r1xr2)*dotp_r0_r1dr2;
-                    wAB_2=wAB_2-r1xr2_2/(norm_r1xr2*norm_r1xr2)*dotp_r0_r1dr2;
-                    wAB_3=wAB_3-r1xr2_3/(norm_r1xr2*norm_r1xr2)*dotp_r0_r1dr2;
-                    
-                    
-                    
-                }
-                if  ( (!((normr1i<=1E-7)||(normr2i<=1E-7))) && coredisti>1E-7)
-                {                    
-                    r1idr2i_1=r11i/normr1i-r21i/normr2i;
-                    r1idr2i_2=r12i/normr1i-r22i/normr2i;
-                    r1idr2i_3=r13i/normr1i-r23i/normr2i;
-                    
-                    dotp_r0_r1idr2i=r1idr2i_1*r01+r1idr2i_2*r02+r1idr2i_3*r03;
-                        
+                    if  ( (!((normr1<=1E-7)||(normr2<=1E-7))) && coredist>1E-7)
+                    {
+                        r1dr2_1=r11/normr1-r21/normr2;
+                        r1dr2_2=r12/normr1-r22/normr2;
+                        r1dr2_3=r13/normr1-r23/normr2;
+
+                        dotp_r0_r1dr2=r1dr2_1*r01+r1dr2_2*r02+r1dr2_3*r03;
+
+                        wAB_1=wAB_1-r1xr2_1/(norm_r1xr2*norm_r1xr2)*dotp_r0_r1dr2;
+                        wAB_2=wAB_2-r1xr2_2/(norm_r1xr2*norm_r1xr2)*dotp_r0_r1dr2;
+                        wAB_3=wAB_3-r1xr2_3/(norm_r1xr2*norm_r1xr2)*dotp_r0_r1dr2;
+
+
+
+                    }
+                    if  ( (!((normr1i<=1E-7)||(normr2i<=1E-7))) && coredisti>1E-7)
+                    {                    
+                        r1idr2i_1=r11i/normr1i-r21i/normr2i;
+                        r1idr2i_2=r12i/normr1i-r22i/normr2i;
+                        r1idr2i_3=r13i/normr1i-r23i/normr2i;
+
+                        dotp_r0_r1idr2i=r1idr2i_1*r01+r1idr2i_2*r02+r1idr2i_3*r03;
+
                         wAB_1i=wAB_1i-r1ixr2i_1/(norm_r1ixr2i*norm_r1ixr2i)*dotp_r0_r1idr2i;
                         wAB_2i=wAB_2i-r1ixr2i_2/(norm_r1ixr2i*norm_r1ixr2i)*dotp_r0_r1idr2i;
                         wAB_3i=wAB_3i-r1ixr2i_3/(norm_r1ixr2i*norm_r1ixr2i)*dotp_r0_r1idr2i;
-                      
-                    
+
+
+                    }
+                }
+                else //Biot_savart law modified for the semi-infinite vortex filaments to remove the singularities during wake vortex interference with downstream surfaces.
+                {
+                    if  ( (!((normr1<=1E-7)||(normr2<=1E-7))) && coredist>1E-7)
+                    {
+                        r1dr2_1=r11/normr1-r21/normr2;
+                        r1dr2_2=r12/normr1-r22/normr2;
+                        r1dr2_3=r13/normr1-r23/normr2;
+
+                        dotp_r0_r1dr2=r1dr2_1*r01+r1dr2_2*r02+r1dr2_3*r03;
+
+                        wAB_1=wAB_1-r1xr2_1/(norm_r1xr2*norm_r1xr2+norm_r0*norm_r0)*dotp_r0_r1dr2;
+                        wAB_2=wAB_2-r1xr2_2/(norm_r1xr2*norm_r1xr2+norm_r0*norm_r0)*dotp_r0_r1dr2;
+                        wAB_3=wAB_3-r1xr2_3/(norm_r1xr2*norm_r1xr2+norm_r0*norm_r0)*dotp_r0_r1dr2;               
+ 
+                    }
+                    if  ( (!((normr1i<=1E-7)||(normr2i<=1E-7))) && coredisti>1E-7)
+                    {                    
+                        r1idr2i_1=r11i/normr1i-r21i/normr2i;
+                        r1idr2i_2=r12i/normr1i-r22i/normr2i;
+                        r1idr2i_3=r13i/normr1i-r23i/normr2i;
+
+                        dotp_r0_r1idr2i=r1idr2i_1*r01+r1idr2i_2*r02+r1idr2i_3*r03;
+
+                        wAB_1i=wAB_1i-r1ixr2i_1/(norm_r1ixr2i*norm_r1ixr2i+norm_r0*norm_r0)*dotp_r0_r1idr2i;
+                        wAB_2i=wAB_2i-r1ixr2i_2/(norm_r1ixr2i*norm_r1ixr2i+norm_r0*norm_r0)*dotp_r0_r1idr2i;
+                        wAB_3i=wAB_3i-r1ixr2i_3/(norm_r1ixr2i*norm_r1ixr2i+norm_r0*norm_r0)*dotp_r0_r1idr2i;
+                    }                    
                 }
             }
          // *(w+n_colloc*k+j)=*(colloc_nvec+j*3)*wAB_1+*(colloc_nvec+1+j*3)*wAB_2+*(colloc_nvec+2+j*3)*wAB_3;

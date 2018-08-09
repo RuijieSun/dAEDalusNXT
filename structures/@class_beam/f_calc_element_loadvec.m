@@ -18,7 +18,14 @@ function [obj] =f_calc_element_loadvec(obj,add_eigenmass,add_fuelmass)
     elseif el_ndof==6
          for i=1:obj.nel      
             %Calculate Element Load Vector
-            obj.beamelement(i)=obj.beamelement(i).elq_6dof(add_eigenmass,add_fuelmass);
+            % Checks if beam is anisotropic. It then runs
+            % elq_6dof_anisotropic if anisotropic, and elq_6dof if
+            % isotropic.
+            if obj.anisotropic == 1
+                obj.beamelement(i)=obj.beamelement(i).elq_6dof_anisotropic(add_eigenmass,add_fuelmass);
+            else
+                obj.beamelement(i)=obj.beamelement(i).elq_6dof(add_eigenmass,add_fuelmass);
+            end
          end
     else
         % number of ndof not implemented

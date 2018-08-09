@@ -240,19 +240,54 @@ classdef class_beam_collection
         % the format [CGx;CGy;CGz].
         % Uses the mass matrix Mglob_lumped
         function CG = f_compute_CG(obj)
-            nNodes = length(obj.node_coords);
+            nodeCoords=obj.node_coords;
+            nNodes = length(nodeCoords);
+            if nNodes*6>size(obj.Mff_lumped,1)
+                %remove clamped node from nodeCoords
+                newNodeCoords=[];
+                idsPrv=0;
+                allIds={};
+                for iBeam=1:length(obj.beam)
+                    ids=unique(obj.dof_node_beam(obj.dof_node_beam(:,3)==iBeam,2));
+                    allIds{iBeam}=ids;
+                    ids=ids+max(idsPrv);
+                    newNodeCoords=[newNodeCoords; obj.node_coords_full(ids,:)];
+                    idsPrv=ids;
+                end
+                nodeCoords=newNodeCoords;
+                nNodes = length(nodeCoords);
+            end
+            if nNodes*6>size(obj.Mff_lumped,1)
+                %combine coupled nodes
+                for iCpl=1:length(obj.coupling_condition)
+                    beam1=obj.coupling_condition(1).beam_idx(1);
+                    beam2=obj.coupling_condition(1).beam_idx(2);
+                    node1=obj.coupling_condition(1).node_idx(1);
+                    node2=obj.coupling_condition(1).node_idx(2);
+                    %move coupled node to the beginning of beam1
+                    allIds{beam1}=[allIds{beam1}(allIds{beam1}==node1); allIds{beam1}(allIds{beam1}~=node1)];
+                    %remove coupled node from beam2
+                    allIds{beam2}=[ allIds{beam2}(allIds{beam2}~=node2)];
+                end
+                newNodeCoords=[];
+                for iBeam=1:length(obj.beam)
+                    newNodeCoords=[newNodeCoords; obj.beam(iBeam).node_coords(allIds{iBeam},:)];
+                end
+                nodeCoords=newNodeCoords;
+                nNodes = length(nodeCoords);
+            end
             Ti = eye(3);
             D = [];
             Tr=zeros(3,3,nNodes);
             di = zeros(6,6,nNodes);
             CG = zeros(3,1);
-            pos = zeros(size(obj.node_coords));
+            pos = zeros(size(nodeCoords));
             
             for i=1:nNodes
                 if isempty(obj.nodal_deflections)
-                    pos(i,:) = obj.node_coords(i,:);
+                    pos(i,:) = nodeCoords(i,:);
                 else
-                    pos(i,:) = obj.node_coords(i,:) + obj.nodal_deflections((i-1)*6+1:(i-1)*6+3)';
+                    pos(i,:) = nodeCoords(i,:) + obj.nodal_deflections((i-1)*6+1:(i-1)*6+3)';
                 end
             end
             for i=1:nNodes
@@ -292,9 +327,47 @@ classdef class_beam_collection
         % Uses the mass matrix obj.Mff_lumped and needs the reference point as input.
         % All calculations are done in the body fixed system.
         function Inertia = f_compute_moment_of_inertia(obj, referencePoint)
+            nodeCoords=obj.node_coords;
+            nNodes = length(nodeCoords);
+            if nNodes*6>size(obj.Mff_lumped,1)
+                %remove clamped node from nodeCoords
+                newNodeCoords=[];
+                idsPrv=0;
+                allIds={};
+                for iBeam=1:length(obj.beam)
+                    ids=unique(obj.dof_node_beam(obj.dof_node_beam(:,3)==iBeam,2));
+                    allIds{iBeam}=ids;
+                    ids=ids+max(idsPrv);
+                    newNodeCoords=[newNodeCoords; obj.node_coords_full(ids,:)];
+                    idsPrv=ids;
+                end
+                nodeCoords=newNodeCoords;
+                nNodes = length(nodeCoords);
+            end
+            
+            if nNodes*6>size(obj.Mff_lumped,1)
+                %combine coupled nodes
+                for iCpl=1:length(obj.coupling_condition)
+                    beam1=obj.coupling_condition(1).beam_idx(1);
+                    beam2=obj.coupling_condition(1).beam_idx(2);
+                    node1=obj.coupling_condition(1).node_idx(1);
+                    node2=obj.coupling_condition(1).node_idx(2);
+                    %move coupled node to the beginning of beam1
+                    allIds{beam1}=[allIds{beam1}(allIds{beam1}==node1); allIds{beam1}(allIds{beam1}~=node1)];
+                    %remove coupled node from beam2
+                    allIds{beam2}=[ allIds{beam2}(allIds{beam2}~=node2)];
+                end
+                newNodeCoords=[];
+                for iBeam=1:length(obj.beam)
+                    newNodeCoords=[newNodeCoords; obj.beam(iBeam).node_coords(allIds{iBeam},:)];
+                end
+                nodeCoords=newNodeCoords;
+                nNodes = length(nodeCoords);
+            end
+            
             k=1;
-            for j=1:1:size((obj.node_coords),1)
-                s_inertial(k:k+5)=[obj.node_coords(j,1:3)' [0 0 0]'];
+            for j=1:1:size((nodeCoords),1)
+                s_inertial(k:k+5)=[nodeCoords(j,1:3)' [0 0 0]'];
                 k=k+6;
             end
             n_dof=length(s_inertial);
@@ -304,7 +377,7 @@ classdef class_beam_collection
             end
             s_inertial=(s_inertial'-I_Hat*referencePoint')';
             k=1;
-            for j=1:1:size((obj.node_coords),1)
+            for j=1:1:size((nodeCoords),1)
                 if isempty(obj.nodal_deflections)
                     delta_inertial(k:k+2)=0;
                     delta_inertial(k+3:k+5)=0;
@@ -513,6 +586,8 @@ classdef class_beam_collection
                         t_sp_fr(i)=cell2mat({obj.beam(j).beamelement(i).crosssection.t_sp_fr});
                         t_sp_re(i)=cell2mat({obj.beam(j).beamelement(i).crosssection.t_sp_re});
                     end
+                    t_max=max([max(t_sk_up),max(t_sk_lo),max(t_sp_fr),max(t_sp_re),t_max]);
+                    t_min=min([min(t_sk_up),min(t_sk_lo),min(t_sp_fr),min(t_sp_re),t_min]);
                     
                 elseif isa(obj.beam(j),'class_fuselage')
                     
@@ -529,8 +604,7 @@ classdef class_beam_collection
                     
                 end
             end
-            t_max
-            t_min
+            
             for i=1:length(obj.beam)
                 if  isa(obj.beam(i),'class_wing')
                 obj.beam(i).plot_structure(t_max,t_min);
@@ -1061,6 +1135,25 @@ classdef class_beam_collection
             end
         end
         
+        % Uses Euler Bernoulli nodal displacements of each beam to recover 
+        function obj = f_calc_stress_strain_crossmod(obj)
+            
+            ndof_node = 6;
+            
+            % scans through all beams
+            for i = 1:length(obj.beam)
+                
+%                 if isa(obj.beam(i),'class_wing') &&  obj.beam(i).anisotropic == 1
+
+                % checks if beam is anisotropic. Only runs for anisotropic beams.
+                if obj.beam(i).anisotropic == 1
+                    
+                    % Runs function at beam level
+                    obj.beam(i) = obj.beam(i).f_calc_stress_strain_crossmod(ndof_node);
+                end
+            end
+         end
+        
         function obj = f_calc_stresses(obj, weights, varargin)
             mem=obj.settings.nonlinear;
             obj.settings.nonlinear=0;
@@ -1068,10 +1161,53 @@ classdef class_beam_collection
             obj.settings.nonlinear=mem;
             for i=1:1:length(obj.beam)
                 if obj.beam(i).isExternalFEM==0
+                    
+                    if obj.beam(i).anisotropic == 1
+                        obj.beam(i) = obj.beam(i).f_calc_stress_strain_crossmod(6);
+                        
+                    else
+                        obj.beam(i)=obj.beam(i).f_calc_stresses(1);
+                    end
+                end
+            end
+        end
+        function obj = f_calc_stresses_free(obj, weights, varargin)
+            mem=obj.settings.nonlinear;
+            obj.settings.nonlinear=0;
+            obj=obj.f_solve_unrestrained();
+            obj.settings.nonlinear=mem;
+            for i=1:1:length(obj.beam)
+                if obj.beam(i).isExternalFEM==0
                     obj.beam(i)=obj.beam(i).f_calc_stresses(1);
                 end
             end
         end
+        % Plots strain and stress data recovered through the cross
+        % sectional modeler. Currently does not work, consider removing
+        % entirely.
+%         function obj = f_plot_crossmod_data(obj,varargin)
+%             figure;
+%             axis('equal');
+%             xlabel('X axis (FLAP)');
+%             ylabel('Y axis (TORSION)');
+%             zlabel('Z axis (LAG)');
+%             hold on;
+%             
+%             if nargin == 2
+%                 beam_idx = varargin;
+%                 for i=1:length(beam_idx)
+%                     obj.beam(i).f_plot_crossmod_data;
+%                 end
+%             else
+%                 for i=1:length(obj.beam)
+%                     if isa(class(obj.beam),'class_wing')
+%                         obj.beam(i).f_plot_crossmod_data;
+%                     end
+%                 end
+%             end
+%             hold off;
+%         end
+        
         
         function obj=f_load_based_self_design(obj,weights,varargin)
             
@@ -1445,7 +1581,7 @@ classdef class_beam_collection
                         obj.nodal_deflections=linsolve(obj.Kff,obj.Ftest);
                     end
                     
-                    obj=obj.f_postprocess();
+                    obj = obj.f_postprocess();
                 end
                 loadstep=loadstep+0.2;
             end
@@ -1500,97 +1636,99 @@ classdef class_beam_collection
             end
             
             obj=obj.f_assemble_free(1,0);
-            K=obj.Kff;
-            M=obj.Mff;
-            if(sum(sum(M)))==0 || isnan(sum(sum(M)))
-                [obj.modeshapes, omega2]= eig(K*1E-8,K);
-            else
-                [obj.modeshapes, omega2]= eig(M,K);
-            end
-            
-            obj.modefrequencies = (1./sqrt(diag(omega2)))/(2*pi); % Since inverse iteration is used in determining matrix A
-            [obj.modefrequencies,index]=sort(obj.modefrequencies);
-            obj.modeshapes(:,:)=obj.modeshapes(:,index);
-            
-            %replace the rigid body modes by unit deflections about body
-            %axis
-%             obj.modeshapes(:,1:6)=0.0;
-%             obj.modeshapes(1:6:end,1)=0.1;
-%             obj.modeshapes(2:6:end,2)=0.1;
-%             obj.modeshapes(3:6:end,3)=0.1;
-%             n_dof=length(obj.nodal_deflections);
-%             I_Hat=[];
-%             for i=1:n_dof/6
-%                 I_Hat=[I_Hat; eye(3,3);zeros(3,3)];
-%             end
-%             Euler=[0.01 0 0];
-%             M_BI=[  cos(Euler(3))*cos(Euler(2))                                             sin(Euler(3))*cos(Euler(2))                                                     -sin(Euler(2));
-%                 cos(Euler(3))*sin(Euler(2))*sin(Euler(1))-sin(Euler(3))*cos(Euler(1))       sin(Euler(3))*sin(Euler(2))*sin(Euler(1))+cos(Euler(3))*cos(Euler(1))           cos(Euler(2))*sin(Euler(1));
-%                 cos(Euler(3))*sin(Euler(2))*cos(Euler(1))+sin(Euler(3))*sin(Euler(1))       sin(Euler(3))*sin(Euler(2))*cos(Euler(1))-cos(Euler(3))*sin(Euler(1))           cos(Euler(2))*cos(Euler(1));];
-%             k=1;
-%             for j=1:1:size((obj.node_coords),1)
-%                 s_inertial(k:k+5)=[M_BI'*(obj.node_coords(j,1:3)-p_ref)' [0.01 0 0]'];
-%                 s_inertial(k:k+2)=s_inertial(k:k+2)-(obj.node_coords(j,1:3)-p_ref);
-%                 k=k+6;
-%             end
-%             obj.modeshapes(:,4)= s_inertial;
-%             Euler=[0 0.01 0];
-%             M_BI=[  cos(Euler(3))*cos(Euler(2))                                             sin(Euler(3))*cos(Euler(2))                                                     -sin(Euler(2));
-%                 cos(Euler(3))*sin(Euler(2))*sin(Euler(1))-sin(Euler(3))*cos(Euler(1))       sin(Euler(3))*sin(Euler(2))*sin(Euler(1))+cos(Euler(3))*cos(Euler(1))           cos(Euler(2))*sin(Euler(1));
-%                 cos(Euler(3))*sin(Euler(2))*cos(Euler(1))+sin(Euler(3))*sin(Euler(1))       sin(Euler(3))*sin(Euler(2))*cos(Euler(1))-cos(Euler(3))*sin(Euler(1))           cos(Euler(2))*cos(Euler(1));];
-%             k=1;
-%             for j=1:1:size((obj.node_coords),1)
-%                 s_inertial(k:k+5)=[M_BI'*(obj.node_coords(j,1:3)-p_ref)' [0 0.01 0]'];
-%                 s_inertial(k:k+2)=s_inertial(k:k+2)-(obj.node_coords(j,1:3)-p_ref);
-%                 k=k+6;
-%             end
-%             obj.modeshapes(:,5)= s_inertial;
-%             Euler=[0 0 0.01];
-%             M_BI=[  cos(Euler(3))*cos(Euler(2))                                             sin(Euler(3))*cos(Euler(2))                                                     -sin(Euler(2));
-%                 cos(Euler(3))*sin(Euler(2))*sin(Euler(1))-sin(Euler(3))*cos(Euler(1))       sin(Euler(3))*sin(Euler(2))*sin(Euler(1))+cos(Euler(3))*cos(Euler(1))           cos(Euler(2))*sin(Euler(1));
-%                 cos(Euler(3))*sin(Euler(2))*cos(Euler(1))+sin(Euler(3))*sin(Euler(1))       sin(Euler(3))*sin(Euler(2))*cos(Euler(1))-cos(Euler(3))*sin(Euler(1))           cos(Euler(2))*cos(Euler(1));];
-%             k=1;
-%             for j=1:1:size((obj.node_coords),1)
-%                 s_inertial(k:k+5)=[M_BI'*(obj.node_coords(j,1:3)-p_ref)' [0 0 -0.01]'];
-%                 s_inertial(k:k+2)=s_inertial(k:k+2)-(obj.node_coords(j,1:3)-p_ref);
-%                 k=k+6;
-%             end
-%             obj.modeshapes(:,6)= s_inertial;
-            
-            %A=linsolve(K,M); % inverse iteration method (http://en.wikipedia.org/wiki/Modal_analysis_using_FEM )
-            try
-            [obj.modeshapes_lumped, omega2_lumped]= eig(obj.Mff_lumped,K);
-                        obj.modefrequencies_lumped = (1./sqrt(diag(omega2_lumped)))/(2*pi);
-                                    [obj.modefrequencies_lumped,index_lumped]=sort(obj.modefrequencies_lumped);
-            obj.modeshapes_lumped(:,:)=obj.modeshapes_lumped(:,index_lumped);
-                        Msx_lumped=real(obj.modeshapes_lumped)'*obj.Mff_lumped*real(obj.modeshapes_lumped);
-            Ksx_lumped=real(obj.modeshapes_lumped)'*obj.Kff*real(obj.modeshapes_lumped);
-            norm_factor_lumped=diag(Msx_lumped);
-            for i=1:length(norm_factor_lumped)
-                obj.modeshapes_lumped(:,i)=real(obj.modeshapes_lumped(:,i)/sqrt(norm_factor_lumped(i)));
-            end
-            end
-            % Script to extract the relevant information from the eigen modes matrix
-            %             j=1;
-            %             for i = 1:size(obj.Mff,2)
-            %                 [ EMA(j), idx(j)] = max(abs(obj.modeshapes(:,i))); % returns the maximum of each column vector from the V matrix
-            %                 r(j) = mod(idx(j),6); % output 0 means the 6th DOF
-            %                 j=j+1;
-            %             end
+            if isempty(obj.modefrequencies)
+                K=obj.Kff;
+                M=obj.Mff;
+                if(sum(sum(M)))==0 || isnan(sum(sum(M)))
+                    [obj.modeshapes, omega2]= eig(K*1E-8,K);
+                else
+                    [obj.modeshapes, omega2]= eig(M,K);
+                end
+
+                obj.modefrequencies = (1./sqrt(diag(omega2)))/(2*pi); % Since inverse iteration is used in determining matrix A
+                [obj.modefrequencies,index]=sort(obj.modefrequencies);
+                obj.modeshapes(:,:)=obj.modeshapes(:,index);
+
+                %replace the rigid body modes by unit deflections about body
+                %axis
+    %             obj.modeshapes(:,1:6)=0.0;
+    %             obj.modeshapes(1:6:end,1)=0.1;
+    %             obj.modeshapes(2:6:end,2)=0.1;
+    %             obj.modeshapes(3:6:end,3)=0.1;
+    %             n_dof=length(obj.nodal_deflections);
+    %             I_Hat=[];
+    %             for i=1:n_dof/6
+    %                 I_Hat=[I_Hat; eye(3,3);zeros(3,3)];
+    %             end
+    %             Euler=[0.01 0 0];
+    %             M_BI=[  cos(Euler(3))*cos(Euler(2))                                             sin(Euler(3))*cos(Euler(2))                                                     -sin(Euler(2));
+    %                 cos(Euler(3))*sin(Euler(2))*sin(Euler(1))-sin(Euler(3))*cos(Euler(1))       sin(Euler(3))*sin(Euler(2))*sin(Euler(1))+cos(Euler(3))*cos(Euler(1))           cos(Euler(2))*sin(Euler(1));
+    %                 cos(Euler(3))*sin(Euler(2))*cos(Euler(1))+sin(Euler(3))*sin(Euler(1))       sin(Euler(3))*sin(Euler(2))*cos(Euler(1))-cos(Euler(3))*sin(Euler(1))           cos(Euler(2))*cos(Euler(1));];
+    %             k=1;
+    %             for j=1:1:size((obj.node_coords),1)
+    %                 s_inertial(k:k+5)=[M_BI'*(obj.node_coords(j,1:3)-p_ref)' [0.01 0 0]'];
+    %                 s_inertial(k:k+2)=s_inertial(k:k+2)-(obj.node_coords(j,1:3)-p_ref);
+    %                 k=k+6;
+    %             end
+    %             obj.modeshapes(:,4)= s_inertial;
+    %             Euler=[0 0.01 0];
+    %             M_BI=[  cos(Euler(3))*cos(Euler(2))                                             sin(Euler(3))*cos(Euler(2))                                                     -sin(Euler(2));
+    %                 cos(Euler(3))*sin(Euler(2))*sin(Euler(1))-sin(Euler(3))*cos(Euler(1))       sin(Euler(3))*sin(Euler(2))*sin(Euler(1))+cos(Euler(3))*cos(Euler(1))           cos(Euler(2))*sin(Euler(1));
+    %                 cos(Euler(3))*sin(Euler(2))*cos(Euler(1))+sin(Euler(3))*sin(Euler(1))       sin(Euler(3))*sin(Euler(2))*cos(Euler(1))-cos(Euler(3))*sin(Euler(1))           cos(Euler(2))*cos(Euler(1));];
+    %             k=1;
+    %             for j=1:1:size((obj.node_coords),1)
+    %                 s_inertial(k:k+5)=[M_BI'*(obj.node_coords(j,1:3)-p_ref)' [0 0.01 0]'];
+    %                 s_inertial(k:k+2)=s_inertial(k:k+2)-(obj.node_coords(j,1:3)-p_ref);
+    %                 k=k+6;
+    %             end
+    %             obj.modeshapes(:,5)= s_inertial;
+    %             Euler=[0 0 0.01];
+    %             M_BI=[  cos(Euler(3))*cos(Euler(2))                                             sin(Euler(3))*cos(Euler(2))                                                     -sin(Euler(2));
+    %                 cos(Euler(3))*sin(Euler(2))*sin(Euler(1))-sin(Euler(3))*cos(Euler(1))       sin(Euler(3))*sin(Euler(2))*sin(Euler(1))+cos(Euler(3))*cos(Euler(1))           cos(Euler(2))*sin(Euler(1));
+    %                 cos(Euler(3))*sin(Euler(2))*cos(Euler(1))+sin(Euler(3))*sin(Euler(1))       sin(Euler(3))*sin(Euler(2))*cos(Euler(1))-cos(Euler(3))*sin(Euler(1))           cos(Euler(2))*cos(Euler(1));];
+    %             k=1;
+    %             for j=1:1:size((obj.node_coords),1)
+    %                 s_inertial(k:k+5)=[M_BI'*(obj.node_coords(j,1:3)-p_ref)' [0 0 -0.01]'];
+    %                 s_inertial(k:k+2)=s_inertial(k:k+2)-(obj.node_coords(j,1:3)-p_ref);
+    %                 k=k+6;
+    %             end
+    %             obj.modeshapes(:,6)= s_inertial;
+
+                %A=linsolve(K,M); % inverse iteration method (http://en.wikipedia.org/wiki/Modal_analysis_using_FEM )
+                try
+                [obj.modeshapes_lumped, omega2_lumped]= eig(obj.Mff_lumped,K);
+                            obj.modefrequencies_lumped = (1./sqrt(diag(omega2_lumped)))/(2*pi);
+                                        [obj.modefrequencies_lumped,index_lumped]=sort(obj.modefrequencies_lumped);
+                obj.modeshapes_lumped(:,:)=obj.modeshapes_lumped(:,index_lumped);
+                            Msx_lumped=real(obj.modeshapes_lumped)'*obj.Mff_lumped*real(obj.modeshapes_lumped);
+                Ksx_lumped=real(obj.modeshapes_lumped)'*obj.Kff*real(obj.modeshapes_lumped);
+                norm_factor_lumped=diag(Msx_lumped);
+                for i=1:length(norm_factor_lumped)
+                    obj.modeshapes_lumped(:,i)=real(obj.modeshapes_lumped(:,i)/sqrt(norm_factor_lumped(i)));
+                end
+                end
+                % Script to extract the relevant information from the eigen modes matrix
+                %             j=1;
+                %             for i = 1:size(obj.Mff,2)
+                %                 [ EMA(j), idx(j)] = max(abs(obj.modeshapes(:,i))); % returns the maximum of each column vector from the V matrix
+                %                 r(j) = mod(idx(j),6); % output 0 means the 6th DOF
+                %                 j=j+1;
+                %             end
 
 
-            % %omega = sqrt(diag(omega2));
-            
+                % %omega = sqrt(diag(omega2));
 
 
-            
-            
-            %% norm modes for reduced mass=1
-            Msx=real(obj.modeshapes)'*obj.Mff*real(obj.modeshapes);
-            Ksx=real(obj.modeshapes)'*obj.Kff*real(obj.modeshapes);
-            norm_factor=diag(Msx);
-            for i=1:length(norm_factor)
-                obj.modeshapes(:,i)=real(obj.modeshapes(:,i)/sqrt(norm_factor(i)));
+
+
+
+                %% norm modes for reduced mass=1
+                Msx=real(obj.modeshapes)'*obj.Mff*real(obj.modeshapes);
+                Ksx=real(obj.modeshapes)'*obj.Kff*real(obj.modeshapes);
+                norm_factor=diag(Msx);
+                for i=1:length(norm_factor)
+                    obj.modeshapes(:,i)=real(obj.modeshapes(:,i)/sqrt(norm_factor(i)));
+                end
             end
             
 

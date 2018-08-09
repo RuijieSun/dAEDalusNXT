@@ -158,6 +158,10 @@ classdef class_beamelement
         %> flag for massless beam elements
         is_massless
         
+        % class_beamelement is now intended to solely handle isotropic
+        % materials. As such, the anisotropic flag is automatically set to
+        % zero.
+        anisotropic = 0;
 
     end
     

@@ -83,10 +83,10 @@ aircraft=aircraft.compute_grid();
 
 if nargin>3
     aircraft=aircraft.compute_deflected_grid(def);
-    wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref);   
+    wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref,aircraft.control_surfaces_parents);   
 else
     aircraft=aircraft.compute_grid;
-    wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref);
+    wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref,aircraft.control_surfaces_parents);
 end
 disp(['     	trimming aircraft for Cl: ' num2str(flight_state.get_Cl(aircraft.reference.S_ref))]);
 wingaero=wingaero.f_solve_for_Cl(flight_state.get_Cl(aircraft.reference.S_ref));
@@ -128,9 +128,9 @@ end
 aircraft=aircraft.compute_grid();
 if nargin>3
         aircraft=aircraft.compute_deflected_grid(def);
-        wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref);
+        wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref,aircraft.control_surfaces_parents);
 else
-    wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref);
+    wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref,aircraft.control_surfaces_parents);
 end
 wingaero=wingaero.f_solve_for_Cl(flight_state.get_Cl(aircraft.reference.S_ref)-delta_Cl);
 if consider_thrust==1
@@ -173,9 +173,9 @@ while(abs(wingaero.CM+delta_CM)>1E-5)
     aircraft=aircraft.compute_grid();
     if nargin>3
         aircraft=aircraft.compute_deflected_grid(def);
-        wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref);
+        wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref, aircraft.control_surfaces_parents);
     else
-        wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref);
+        wingaero=class_VLM_solver(aircraft.grid,aircraft.te_idx,aircraft.panels,flight_state.aerodynamic_state,trim_ref, aircraft.control_surfaces_parents);
     end
     wingaero=wingaero.f_solve_for_Cl(flight_state.get_Cl(aircraft.reference.S_ref)-delta_Cl);
     if consider_thrust==1

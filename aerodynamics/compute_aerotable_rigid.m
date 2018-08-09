@@ -16,7 +16,7 @@ if nargin==2
     aircraft=aircraft.compute_grid();
     config=0;
 else
-    deflected=1;
+    deflected=varargin{3};
     def=varargin{1};
     aircraft=aircraft.compute_deflected_grid(def);
     config=1;
@@ -184,7 +184,7 @@ for conf=vecConf
             i=1;
             for beta=vecBeta
                 disp(['Ma=' num2str(Ma) ' aoa=' num2str(alpha) ' beta=' num2str(beta)])
-                state=class_aero_state(Uinf,alpha,beta,Ma,rho_air,mu);
+                state=class_aero_state(Uinf,alpha,-beta,Ma,rho_air,mu); %Beta is changed to the reference frame of the aerostructural model(i.e. z axis pointing upwards)
                 if deflected
                     wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,state,aircraft.reference);
                 else
@@ -329,7 +329,7 @@ for conf=vecConf
         for alpha=vecAlpha
             i=1;
             for beta=vecBeta
-                state=class_aero_state(Uinf,alpha,beta,Ma,rho_air);
+                state=class_aero_state(Uinf,alpha,-beta,Ma,rho_air);
                 if deflected
                     wingaero=class_VLM_solver(aircraft.grid_deflected,aircraft.te_idx,aircraft.panels,state,aircraft.reference);
                 else

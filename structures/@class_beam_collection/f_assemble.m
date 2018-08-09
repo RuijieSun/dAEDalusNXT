@@ -36,6 +36,12 @@ function obj=f_assemble(obj,loadstep,eval_nonlin)
             for i=1:1:length(obj.beam)
                 sys_ndof(i)=length(obj.beam(i).Kff);
             end
+            obj.node_coords=[];
+            for i=1:length(obj.beam)
+               obj.node_coords=[obj.node_coords; obj.beam(i).node_coords];
+            end 
+            
+            obj.node_coords_full=obj.node_coords;
             
             % preallocate system stiffness and load and mass matrices
             obj.Kglob=zeros(sum(sys_ndof));

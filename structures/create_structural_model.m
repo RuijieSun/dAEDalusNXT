@@ -5,12 +5,32 @@
 % 
 % This file is part of dAEDalusNXT (https://github.com/seyk86/dAEDalusNXT)
 %
-function [aircraft,aircraft_structure]=create_structural_model(aircraft)
+
+% Due to implementation of anisotropic materials, structure_solver_settings
+% is now part of the input. The object contains information on the
+% discretization of the beam-element cross sections through the cross
+% sectional modeller
+function [aircraft,aircraft_structure]=create_structural_model(aircraft,structure_solver_settings)
 
 for nwings=1:length(aircraft.wings_structural_properties)
     wing_settings=class_structural_settings_wing;
-    %TODO: different material for each segment
-    material=class_material(aircraft.wings_structural_properties(nwings).material(1));
+    
+    % The nr of nodes and maximum shell width for the cross sectional
+    % discretization are saved within wing_settings
+    wing_settings.nr_nodes_crosssection_element=structure_solver_settings.nr_nodes_crosssection_element;
+    wing_settings.ds_nodes_crosssection_element=structure_solver_settings.ds_nodes_crosssection_element;
+    
+    % reads the name of the material saved within the XML file. If the
+    % material type is listed as "anisotropic" it runs
+    % class_material_anisotropic and sets  anisotropic_flag = 1.
+    % Otherwise class_material is run and the anisotropic_flag = 0.
+    if strcmp(aircraft.wings_structural_properties(nwings).material(1),'anisotropic')
+        material=class_material_anisotropic(aircraft.addSettings.skins_ply_material); %assumes that spars use same ply material as skin
+        anisotropic_flag = 1;
+    else
+        material=class_material(aircraft.wings_structural_properties(nwings).material(1));
+        anisotropic_flag = 0;
+    end
     wing_settings=wing_settings.f_set_material(material);
     %modify minThicknesses if specified in XML
     if isfield(aircraft.addSettings, 'wingTminSK')
@@ -22,7 +42,16 @@ for nwings=1:length(aircraft.wings_structural_properties)
     aircraft=aircraft.compute_wingbox_coords();
     
     n_elems = (size(aircraft.wings(nwings).wingbox_coords,2)-1)*(aircraft.wings(nwings).symmetric+1);
-    wingbox_crosssections = repmat([class_crosssection_wingbox()], 1, n_elems);
+    
+    % Checks if the wing is made of anisotropic material. If so,
+    % class_crosssection_wingbox_anisotropic is run. Otherwise
+    % class_crosssection_wingbox is run.
+    if anisotropic_flag == 1
+        wingbox_crosssections = repmat([class_crosssection_wingbox_anisotropic()], 1, n_elems);
+    else
+        wingbox_crosssections = repmat([class_crosssection_wingbox()], 1, n_elems);
+    end
+    
     if isfield(aircraft.wings(nwings).wing_segments(1).structural_properties, 'fs_segments')
         c_elems = 1;
         for k = 1:(1 + aircraft.wings(nwings).symmetric)
@@ -40,14 +69,26 @@ for nwings=1:length(aircraft.wings_structural_properties)
         end
     end
     
-    wingstructure=class_wing(n_elems, wingbox_crosssections, aircraft.wings(nwings).name);
+    % Implementation of anisotropic materials requires to include
+    % anisotropic_flag within the inputs to class_wing
+    wingstructure=class_wing(n_elems, wingbox_crosssections, anisotropic_flag, aircraft.wings(nwings).name);
     %modify fuelingfactor if specified in XML
     if isfield(aircraft.addSettings, 'wingboxFuelingFactor')
         wingstructure=wingstructure.f_set_fuelingFactor(aircraft.addSettings.wingboxFuelingFactor);
     end
     wingstructure=wingstructure.f_init_structure(aircraft.wings(nwings),aircraft.wings_structural_properties(nwings).is_fueled);
     if wingstructure.isExternalFEM==0
-        wingstructure=wingstructure.f_init_material_properties(wing_settings);
+        wingstructure=wingstructure.f_init_material_properties(wing_settings, anisotropic_flag, aircraft.addSettings);
+        
+        % if the wing is anisotropic, the cross sectional modeller is run
+        % automatically
+        if anisotropic_flag == 1
+            wingstructure = wingstructure.cross_sectional_modeler(wing_settings);
+        end
+        
+        wingstructure.update_M=1;
+        wingstructure.update_K=1;
+        wingstructure.update_Q=1;
     elseif wingstructure.isExternalFEM==1
         % TODO: do material properties and allowed stresses need to be given?
         
@@ -89,7 +130,7 @@ for nfuse=1:length(aircraft.fuselages)
     fuselage_settings.delta_pressure=8.9632e+04;
     fuselage_settings=fuselage_settings.f_set_material(class_material('aluminum'));
     aircraft=aircraft.compute_shell_coords();
-    aircraft.fuselages(nfuse)=aircraft.fuselages(nfuse).compute_shell_coords(aircraft.grid_settings.y_max_grid_size);
+    aircraft.fuselages(nfuse)=aircraft.fuselages(nfuse).compute_shell_coords(aircraft.grid_settings.dy_max_struct_grid);
     
     n_elems = size(aircraft.fuselages(nfuse).center_coords,2)-1;
     fuselage_crosssections = repmat([class_crosssection_fuselage()], 1, n_elems);
@@ -311,3 +352,4 @@ if ~isempty(del_idx)
     aircraft_structure.coupling_condition=temp_cc;
 end
 aircraft_structure=aircraft_structure.f_calc_mass(aircraft.weights);
+aircraft_structure=aircraft_structure.f_set_solver_settings(structure_solver_settings);

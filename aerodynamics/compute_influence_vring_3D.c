@@ -142,7 +142,7 @@ void compute_influence_vring3D(double *grid,double *panels, double *colloc,doubl
 			
                 coredist2=sqrt(r1xr0_1*r1xr0_1+r1xr0_2*r1xr0_2+r1xr0_3*r1xr0_3)/norm_forCoredist2;
                 
-                if  ((coredist>0.01) && (coredist2>0.01))
+                if  ((coredist>1E-7) && (coredist2>1E-7))
                 {
                     r1dr2_1=r11/normr1-r21/normr2;
                     r1dr2_2=r12/normr1-r22/normr2;

@@ -27,7 +27,7 @@ end
 
 for i=1:length(state)
    disp(['   critical case ' num2str(i) ' out of ' num2str(length(state))]);
-    wingstructure_prv=aircraft_structure.f_copy; %deep copy wingstructure
+    wingstructure_prv=aircraft_structure; %deep copy wingstructure
     [ac,aircraft_structure,wingaero]=structural_sizing_loop(aircraft,aircraft_structure,state(i),weights,aeroelastic_solver_settings,overwrite);
     
     for nb=1:length(aircraft_structure.beam)

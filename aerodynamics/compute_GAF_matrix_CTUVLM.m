@@ -5,7 +5,7 @@
 % 
 % This file is part of dAEDalusNXT (https://github.com/seyk86/dAEDalusNXT)
 %
-function [Q] = compute_GAF_matrix_CTUVLM(k,nmod,aircraft,aircraft_structure,state,name,UVLM_settings,exag,varargin)
+function [Q,VGaf] = compute_GAF_matrix_CTUVLM(k,nmod,aircraft,aircraft_structure,state,name,UVLM_settings,exag,varargin)
 % check if trim shape is given
 if nargin==9
     shape=varargin{1};
@@ -160,7 +160,7 @@ QDaed = vecMag.*exp(vecPhase*sqrt(-1));
 Q=QDaed/(.5*state.rho_air*VGaf^2*aircraft.reference.S_ref);           
 
 
-% save([aircraft.name '/' name],'Q','Q_0','k','aircraft_structure','aircraft','-v7.3');
+% save([aircraft.name '/' name],'Q','k','aircraft_structure','aircraft','-v7.3');
 
 
 

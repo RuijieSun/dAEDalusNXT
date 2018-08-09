@@ -18,7 +18,6 @@ function [ailstate] =critical_aileron_roll_load_state(ref_state,gfactor,wingno,a
     ailstate=ref_state;
     ailstate.load_factor=gfactor;
     ailstate.aerodynamic_state.V_A=ref_state.VD/1.15;
-    ailstate.aircraft_state.control_deflections{find(not(cellfun('isempty',strfind(ref_state.aircraft_state.control_surfaces,[wingno, '_left']))))}=angle;
-    ailstate.aircraft_state.control_deflections{find(not(cellfun('isempty',strfind(ref_state.aircraft_state.control_surfaces,[wingno, '_right']))))}=angle;
+    ailstate.aircraft_state.control_deflections{find(not(cellfun('isempty',strfind(ref_state.aircraft_state.control_surfaces,[wingno]))))}=angle;
 end
 

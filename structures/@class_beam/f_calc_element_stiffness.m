@@ -25,8 +25,13 @@ function [obj] = f_calc_element_stiffness(obj)
     elseif el_ndof==6
          for i=1:obj.nel   
             %Calculate Element Stiffness Matrices
-            obj.beamelement(i)=obj.beamelement(i).lin_elK_6dof();      
-            
+            % Checks if the beam is anisotropic. If so, it runs the
+            % anisotropic version of lin_elK_6dof.
+            if obj.anisotropic == 1
+                obj.beamelement(i)=obj.beamelement(i).lin_elK_6dof_anisotropic();
+            else
+                obj.beamelement(i)=obj.beamelement(i).lin_elK_6dof();
+            end
 %             %---- Simon: enforce beam property symmetry
 %             if i>obj.nel/2
 %                obj.beamelement(i)=obj.beamelement(i-((i-(obj.nel/2)-1)*2+1)).lin_elK_6dof();

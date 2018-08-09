@@ -65,6 +65,8 @@ classdef class_wingsegment
         xyz_te_device;
         %> edge coordinates of leading edge device
         xyz_le_device;
+        %> edge coordinates of spoiler device
+        xyz_sp_device;
         %> segment area
         S;
         %> segment wetted area
@@ -79,15 +81,19 @@ classdef class_wingsegment
         
         has_te_cs=0; % information flag if there is a trailing edge control surface
         has_le_cs=0; % information flag if there is a leading edge control surface
+        has_sp_cs=0; % information flag if there is a spoiler control surface
         
         le_device; % class containing the information about the leading edge control surface
         te_device; % class containing the information about the leading edge control surface
+        sp_device; % class containing the information about the spoiler control surface
         
         c_le_device;
         c_te_device;
+        c_sp_device;
         
         delta_te_device;
         delta_le_device;
+        delta_sp_device;
         
         te_max_defl;
         te_min_defl;
@@ -96,6 +102,11 @@ classdef class_wingsegment
         n_chord;
         n_le_panels;
         n_te_panels;
+        n_sp_panels;
+        n_ctr1_panels;
+        n_ctr2_panels;
+        n_te_panels_overlap;
+        n_te_panels_free;
         
         D_f;
         CD_f;
@@ -537,11 +548,34 @@ classdef class_wingsegment
             end
         end
         
-        function obj=add_control_surface(obj,control_surface)
+        function obj=add_control_surface(obj,control_surface,varargin)
+            
+            % In case the control surfaces are untapered, the chord of the
+            % CS should be constant throughout the whole CS, meaning that
+            % the "hinge" property of the CS is multiplied with the root
+            % chord of the parent segment. In case of a CS spread over
+            % multiple segments, the children would lose the root chord
+            % info of the parent, and their chord would be wrongly
+            % sized using the root chords of the children, rather than the parent's. 
+            % This is fixed by thenargin=3 case below, where varargin{1} is the root chord of
+            % the segment where the original CS surface starts. The hinge
+            % of the CS is later multiplied with the hinge_mult, so that
+            % when multiplying the hinge of the child with the root chord
+            % of the child, the chord of the parent CS is obtained.
+            
+            % Obviously if the CS is tapered, none of this is applied, and
+            % the hinge_mult is 1.
+            if nargin == 3
+                hinge_mult =  varargin{1}/obj.c_r;
+            elseif nargin==2
+                hinge_mult =  1;
+            end
+            
             switch(control_surface.pos)
                 case 0
                     obj.te_device=control_surface;
-                    cs_te=control_surface.hinge;
+                    obj.te_device.hinge = obj.te_device.hinge*hinge_mult;
+                    cs_te=obj.te_device.hinge;
                     
                     for i=1:length(cs_te)
                         if i<length(cs_te)
@@ -555,7 +589,8 @@ classdef class_wingsegment
                     
                 case 1
                     obj.le_device=control_surface;
-                    cs_le=control_surface.hinge;
+                    obj.le_device.hinge = obj.le_device.hinge*hinge_mult;
+                    cs_le=obj.le_device.hinge;
                     for i=1:length(cs_le)
                         if i==1
                             obj.c_le_device(i)=obj.c_r*cs_le(i);
@@ -565,6 +600,13 @@ classdef class_wingsegment
                         obj.delta_le_device(i)=0;
                     end
                     obj.has_le_cs=1;
+                case 2
+                    obj.sp_device=control_surface;
+                    obj.sp_device.hinge = obj.sp_device.hinge*hinge_mult;
+                    cs_sp=obj.sp_device.hinge;
+                    obj.c_sp_device=obj.c_r*cs_sp;
+                    obj.delta_sp_device=0;
+                    obj.has_sp_cs=1;
             end
             
             obj=obj.compute_controlsurface_coordinates();
@@ -722,25 +764,45 @@ classdef class_wingsegment
         end
         
         function obj=f_deflect_control_surface(obj,name,deflection,varargin)
+            
             side=[];
+            
             if nargin==4
                 side=varargin{1};
             end
             
-            if strcmp(name,obj.te_device.name)
-                if ~isempty(side)
-                    if strcmp(side,'left')
-                        obj.te_device.delta=deflection;
-                        obj.te_device.delta_l_r(1)=deflection;
-                    elseif strcmp(side,'right')
-                        obj.te_device.delta_l_r(2)=deflection;
+            
+            if  ~isempty(obj.te_device)
+                if strcmp(name,obj.te_device.name)
+                    if ~isempty(side)
+                        if strcmp(side,'left')
+                            obj.te_device.delta=deflection;
+                            obj.te_device.delta_l_r(1)=deflection;
+                        elseif strcmp(side,'right')
+                            obj.te_device.delta_l_r(2)=deflection;
+                        end
                     end
+                    obj.te_device.delta=deflection;
                 end
-                obj.te_device.delta=deflection;
-            elseif strcmp(name,obj.le_device.name)
-                obj.le_device.delta=deflection;
             end
+            
+            
+            if  ~isempty(obj.le_device)
+                if strcmp(name,obj.le_device.name)
+                    obj.le_device.delta=deflection;
+                end
+            end
+            
+            
+            if  ~isempty(obj.sp_device)
+                if strcmp(name,obj.sp_device.name)
+                    obj.sp_device.delta=deflection;
+                end
+            end
+            
+            
             obj=obj.compute_controlsurface_coordinates();
+            
         end
         
         function obj=deflect_control_surface(obj,name,delta)
@@ -808,6 +870,9 @@ classdef class_wingsegment
             if obj.has_le_cs
                 obj.delta_le_device=obj.le_device.delta;
             end
+            if obj.has_sp_cs
+                obj.delta_sp_device=obj.sp_device.delta;
+            end 
             
             p1=obj.xyz(:,1)';
             p2=obj.xyz(:,2)';
@@ -822,10 +887,19 @@ classdef class_wingsegment
                       p2=p2*(sum(obj.c_te_device)*obj.c_t/obj.c_r/t2)+p3*(1-sum(obj.c_te_device)*obj.c_t/obj.c_r/t2);
 %                     p1=p4+[-sum(obj.c_te_device)*cos(obj.Theta_r*pi/180) -sum(obj.c_te_device)*sin(obj.Theta_r*pi/180)*sin(obj.dihed*pi/180) sum(obj.c_te_device)*sin(obj.Theta_r*pi/180)*cos(obj.dihed*pi/180)];
 %                     p2=p3+[-sum(obj.c_te_device)*cos(obj.Theta_t*pi/180) -sum(obj.c_te_device)*sin(obj.Theta_t*pi/180)*sin(obj.dihed*pi/180) sum(obj.c_te_device)*sin(obj.Theta_t*pi/180)*cos(obj.dihed*pi/180)]*obj.c_t/obj.c_r;
+               
+
+                % in the else loop below t2 was introduced (absent in
+                % previous versions of the code). This is fundamental to
+                % calculate coordinates of an untapered TE CS (it was
+                % always calculated tapered before, regardless of the
+                % is_tapered attribute value)
                 else
                       t1=norm(p4-p1);
-                      p1=p1*(sum(obj.c_te_device)/t1)+p4*(1-sum(obj.c_te_device)/t1);
-                      p2=p2*(sum(obj.c_te_device)/t1)+p3*(1-sum(obj.c_te_device)/t1);
+                      t2=norm(p3-p2);
+                      p1 = p1*(sum(obj.c_te_device)/t1)+p4*(1-sum(obj.c_te_device)/t1);
+                      p2 = p2*(sum(obj.c_te_device)/t2)+p3*(1-sum(obj.c_te_device)/t2);
+ 
 %                     p1=p4+[-sum(obj.c_te_device)*cos(obj.Theta_r*pi/180) -sum(obj.c_te_device)*sin(obj.Theta_r*pi/180)*sin(obj.dihed*pi/180) sum(obj.c_te_device)*sin(obj.Theta_r*pi/180)*cos(obj.dihed*pi/180)];
 %                     p2=p3+[-sum(obj.c_te_device)*cos(obj.Theta_t*pi/180) -sum(obj.c_te_device)*sin(obj.Theta_t*pi/180)*sin(obj.dihed*pi/180) sum(obj.c_te_device)*sin(obj.Theta_t*pi/180)*cos(obj.dihed*pi/180)];
                 end
@@ -872,8 +946,18 @@ classdef class_wingsegment
                 
                 obj.xyz_le_device=zeros(length(obj.c_le_device),3,4);
                 
+                % Before the taper_correction was introduced below, the LE
+                % CS was always considered untapered, regardless of its
+                % is_tapered attribute value.
+                if obj.le_device.is_tapered == 0
+                    taper_correction = 1;
+                else
+                    taper_correction = obj.c_r/obj.c_t;
+                end
+                    
+                % Location where taper_correction was introduced (p3)
                 p4=obj.xyz(:,1)'-[-sum(obj.c_le_device)*cos(obj.Theta_r*pi/180) -(sum(obj.c_le_device))*sin(obj.Theta_r*pi/180)*sin(obj.dihed*pi/180) +(sum(obj.c_le_device))*sin(obj.Theta_r*pi/180)*cos(obj.dihed*pi/180)];
-                p3=obj.xyz(:,2)'-[-sum(obj.c_le_device)*cos(obj.Theta_t*pi/180) -(sum(obj.c_le_device))*sin(obj.Theta_t*pi/180)*sin(obj.dihed*pi/180) +(sum(obj.c_le_device))*sin(obj.Theta_t*pi/180)*cos(obj.dihed*pi/180)];
+                p3=obj.xyz(:,2)'-[-sum(obj.c_le_device)*cos(obj.Theta_t*pi/180) -(sum(obj.c_le_device))*sin(obj.Theta_t*pi/180)*sin(obj.dihed*pi/180) +(sum(obj.c_le_device))*sin(obj.Theta_t*pi/180)*cos(obj.dihed*pi/180)] / taper_correction;
                 
                 for i=length(obj.c_le_device):-1:1
                     dvec1=[(cos(obj.delta_le_device(i)*pi/180)*obj.c_le_device(i))*cos(obj.Theta_r*pi/180) (cos(obj.delta_le_device(i)*pi/180)*obj.c_le_device(i))*sin(obj.Theta_r*pi/180)*sin(obj.dihed*pi/180) -(cos(obj.delta_le_device(i)*pi/180)*obj.c_le_device(i))*sin(obj.Theta_r*pi/180)*cos(obj.dihed*pi/180)];
@@ -881,14 +965,70 @@ classdef class_wingsegment
                     dvec2=[obj.c_le_device(i)*sin(obj.delta_le_device(i)*pi/180)*cos(obj.dihed*pi/180)*sin(obj.Theta_r*pi/180) -obj.c_le_device(i)*sin(obj.delta_le_device(i)*pi/180)*sin(obj.dihed*pi/180) obj.c_le_device(i)*sin(obj.delta_le_device(i)*pi/180)*cos(obj.dihed*pi/180)*cos(obj.Theta_r*pi/180)];
                     dvec4=[obj.c_le_device(i)*sin(obj.delta_le_device(i)*pi/180)*cos(obj.dihed*pi/180)*sin(obj.Theta_t*pi/180) -obj.c_le_device(i)*sin(obj.delta_le_device(i)*pi/180)*sin(obj.dihed*pi/180) obj.c_le_device(i)*sin(obj.delta_le_device(i)*pi/180)*cos(obj.dihed*pi/180)*cos(obj.Theta_t*pi/180)];
                     
-                    p2=p3-dvec3+dvec4;
-                    p1=p4-dvec1+dvec2;
+                    % Location where taper_correction was introduced (p2)
+                    p2=p3-(dvec3+dvec4) / taper_correction;
+                    p1=p4- (dvec1+dvec2);
                     
                     obj.xyz_le_device(i,:,:)=[p1' p2' p3' p4'];
                     
                     p4=p1;
                     p3=p2;
                 end
+            end
+            
+            if obj.c_sp_device~=0
+                
+                obj.xyz_sp_device=zeros(length(obj.c_sp_device),3,4);
+                
+                % equivalents of vectors t1 and t2 used in TE surface
+                vect_root = obj.xyz(:,4) - obj.xyz(:,1);
+                vect_tip = obj.xyz(:,3) - obj.xyz(:,2);
+                
+                % if the CS are constant (untapered), point nr 3 is sized
+                % by relating the chord of the Spoiler to the segment ROOT
+                % CHORD, rather than the tip chord, which is used if
+                % tapered.
+                if obj.sp_device.is_tapered==0
+                    
+                    % if innerBorder_coords is empty, we are reading from
+                    % our in-house XML, so our variables for defining the
+                    % Spoiler coordinats are used. If it is not empty, then
+                    % CPACS is being used, and the CPACS variables are
+                    % called.
+                    if isempty(obj.sp_device.innerBorder_coords)
+
+                        p1 = obj.xyz(:,1) + vect_root * obj.sp_device.xsi_LE_inner;
+                        p4 = obj.xyz(:,1) + vect_root *(obj.sp_device.xsi_LE_inner + obj.sp_device.hinge);
+                        p2 = obj.xyz(:,2) + vect_tip * obj.sp_device.xsi_LE_outer;
+                        p3 = obj.xyz(:,2) + vect_tip * obj.sp_device.xsi_LE_outer + obj.sp_device.hinge * vect_root;
+
+                    else
+                        p1 = obj.xyz(:,1) + vect_root * obj.sp_device.innerBorder_coords(3);
+                        p4 = obj.xyz(:,1) + vect_root * obj.sp_device.innerBorder_coords(4);
+                        p2 = obj.xyz(:,2) + vect_tip * obj.sp_device.outerBorder_coords(3);
+                        p3 = obj.xyz(:,2) + vect_tip * obj.sp_device.outerBorder_coords(3) + vect_root * (obj.sp_device.innerBorder_coords(4) - obj.sp_device.innerBorder_coords(3));
+                    end
+                
+                % same comments as the "parent if statement". Only
+                % difference is that this is for tapered surfaces, so point
+                % 3 is sized using the CS hinge and tip chord.
+                else
+                    if isempty(obj.sp_device.innerBorder_coords)
+
+                        p1 = obj.xyz(:,1) + vect_root * obj.sp_device.xsi_LE_inner;
+                        p4 = obj.xyz(:,1) + vect_root *(obj.sp_device.xsi_LE_inner + obj.sp_device.hinge);
+                        p2 = obj.xyz(:,2) + vect_tip * obj.sp_device.xsi_LE_outer;
+                        p3 = obj.xyz(:,2) + vect_tip * (obj.sp_device.xsi_LE_outer + obj.sp_device.hinge);
+
+                    else
+                        p1 = obj.xyz(:,1) + vect_root * obj.sp_device.innerBorder_coords(3);
+                        p4 = obj.xyz(:,1) + vect_root * obj.sp_device.innerBorder_coords(4);
+                        p2 = obj.xyz(:,2) + vect_tip * obj.sp_device.outerBorder_coords(3);
+                        p3 = obj.xyz(:,2) + vect_tip * obj.sp_device.outerBorder_coords(4);
+                    end
+                end
+                
+                obj.xyz_sp_device(1,:,:)=[p1, p2, p3, p4];
             end
         end
         
@@ -905,7 +1045,6 @@ classdef class_wingsegment
         end
         
         function obj = read_wingbox_coords(obj,pathNodeCoords,n,iNodes)
-            span_grid=0:1/n:1;
             span_grid_aero=0:1/obj.n_span:1;
             front_coords=[];
             rear_coords=[];
@@ -913,9 +1052,23 @@ classdef class_wingsegment
             
             nodeCoords = importdata(pathNodeCoords);
             segmentNodeCoords = nodeCoords(iNodes:iNodes+n,:);
-            
+            %to find the c4 coords, we need to project each nodeCoord on
+            %the segments one quarter line
+            %vector of c4 line
+            c4Vec = ((obj.xyz(:,2)*0.75+obj.xyz(:,3)*0.25)-(obj.xyz(:,1)*0.75+obj.xyz(:,4)*0.25));
+            c4Vec2=dot(c4Vec,c4Vec);
             for i=1:n+1
-                 c4_coords(:,i)=(obj.xyz(:,1)*0.75+obj.xyz(:,4)*0.25)+span_grid(i)*(obj.xyz(:,2)*0.75+obj.xyz(:,3)*0.25-obj.xyz(:,1)*0.75-obj.xyz(:,4)*0.25);
+                %vector from inboard c4 point to nodeCoord
+                c4inboardnC = (segmentNodeCoords(i,:)'-(obj.xyz(:,1)*0.75+obj.xyz(:,4)*0.25));
+                %portion of the c4 coord where the shortest distance happens 
+                p = dot(c4inboardnC,c4Vec)/c4Vec2;
+                %check if p is less than 0
+                if p<0
+                    p=0;
+                elseif p>1
+                    p=1;
+                end
+                c4_coords(:,i) =  ( obj.xyz(:,1)*0.75 + obj.xyz(:,4) * 0.25 ) + p * c4Vec;    
             end
             
             obj.wingbox_coords=zeros(3,n+1,2);
@@ -1057,11 +1210,31 @@ classdef class_wingsegment
                             handle=fill3(squeeze(obj.xyz_le_device(i,1,:))',-squeeze(obj.xyz_le_device(i,2,:))',squeeze(obj.xyz_le_device(i,3,:))','g');
                             alpha(handle,0.4);
                         else
-                            obj.te_device.delta=obj.te_device.delta*-1;
+                            obj.le_device.delta=obj.le_device.delta*-1;
                             obj=obj.compute_controlsurface_coordinates();
                             handle=fill3(squeeze(obj.xyz_le_device(i,1,:))',-squeeze(obj.xyz_le_device(i,2,:))',squeeze(obj.xyz_le_device(i,3,:))','g');
                             alpha(handle,0.4);
-                            obj.te_device.delta=obj.te_device.delta*-1;
+                            obj.le_device.delta=obj.le_device.delta*-1;
+                            obj=obj.compute_controlsurface_coordinates();
+                        end
+                    end
+                end
+            end
+            
+            if ~isempty(obj.sp_device)
+                for i=1:length(obj.c_sp_device)
+                    handle=fill3(squeeze(obj.xyz_sp_device(i,1,:))',squeeze(obj.xyz_sp_device(i,2,:))',squeeze(obj.xyz_sp_device(i,3,:)+0.05)','y');
+                    alpha(handle,0.4)
+                    if obj.symmetric==1
+                        if obj.sp_device.is_sym_defl
+                            handle=fill3(squeeze(obj.xyz_sp_device(i,1,:))',-squeeze(obj.xyz_sp_device(i,2,:))',squeeze(obj.xyz_sp_device(i,3,:)+0.05)','y');
+                            alpha(handle,0.4);
+                        else
+                            obj.sp_device.delta=obj.sp_device.delta*-1;
+                            obj=obj.compute_controlsurface_coordinates();
+                            handle=fill3(squeeze(obj.xyz_sp_device(i,1,:))',-squeeze(obj.xyz_sp_device(i,2,:))',squeeze(obj.xyz_sp_device(i,3,:)+0.05)','y');
+                            alpha(handle,0.4);
+                            obj.sp_device.delta=obj.sp_device.delta*-1;
                             obj=obj.compute_controlsurface_coordinates();
                         end
                     end
@@ -1088,7 +1261,7 @@ classdef class_wingsegment
         end
         
         function obj=compute_forces(obj,panel_forces,panels,grid)
-            n_pan=sum([obj.n_le_panels obj.n_chord  obj.n_te_panels]);
+            n_pan=sum([obj.n_le_panels obj.n_ctr1_panels obj.n_sp_panels obj.n_ctr2_panels  obj.n_te_panels]);
             obj.span_forces=zeros(3,obj.n_span);
             obj.span_moments=zeros(3,obj.n_span);
             span_grid=0.5/obj.n_span:1/obj.n_span:1-0.5/obj.n_span;
@@ -1113,7 +1286,7 @@ classdef class_wingsegment
         
         function grid=compute_deflected_grid_left(obj,panels,grid,deflections_structmesh,offset)
             span_grid=0:1/obj.n_span:1;
-            n_pan=sum([obj.n_le_panels obj.n_chord  obj.n_te_panels]);
+            n_pan=sum([obj.n_le_panels obj.n_ctr1_panels obj.n_sp_panels obj.n_ctr2_panels  obj.n_te_panels]);
             
             le_ctr=1;
             le_loc_ctr=1;
@@ -1224,6 +1397,43 @@ classdef class_wingsegment
                                 end
                             end
                         elseif j==n_pan-sum(obj.n_te_panels)
+                            grid(:,panels(3,idx))=grid(:,panels(3,idx))+deflections_structmesh(1:3,i);
+                            dist_x=abs(grid(1,panels(3,idx))-c4_coords_edge(1,i));
+                            sgnx=sign(grid(1,panels(3,idx))-c4_coords_edge(1,i));
+                            dTheta=deflections_structmesh(5,i);
+                            Theta=R(2);
+                           %  plot3(c4_coords_edge(1,i)-grid(1,panels(4,idx)),c4_coords_edge(2,i),c4_coords_edge(3,i),'cx')
+                            dx2=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                            dz2=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                            dTheta=deflections_structmesh(6,i);
+                            Theta=R(3);
+                            dx3=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                            dy3=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                            delta_twist_4=[dx2+dx3;-dy3;dz2];
+                            grid(:,panels(3,idx))=grid(:,panels(3,idx))+delta_twist_4;
+                        end
+                        
+                    end
+                    if obj.has_sp_cs
+                        if j==obj.n_ctr1_panels+sum(obj.n_le_panels)
+                            grid(:,panels(3,idx))=grid(:,panels(3,idx))+deflections_structmesh(1:3,i);
+                                dist_x=abs(grid(1,panels(3,idx))-c4_coords_edge(1,i));
+                            sgnx=sign(grid(1,panels(3,idx))-c4_coords_edge(1,i));
+                            dTheta=deflections_structmesh(5,i);
+                            Theta=R(2);
+                           %  plot3(c4_coords_edge(1,i)-grid(1,panels(4,idx)),c4_coords_edge(2,i),c4_coords_edge(3,i),'cx')
+                            dx2=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                            dz2=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                            dTheta=deflections_structmesh(6,i);
+                            Theta=R(3);
+                            dx3=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                            dy3=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                            delta_twist_4=[dx2+dx3;-dy3;dz2];
+                            grid(:,panels(3,idx))=grid(:,panels(3,idx))+delta_twist_4;
+                        end
+                    end
+                    if and(obj.has_sp_cs,~obj.has_te_cs)
+                        if j==obj.n_ctr1_panels+sum(obj.n_le_panels)+obj.n_sp_panels
                             grid(:,panels(3,idx))=grid(:,panels(3,idx))+deflections_structmesh(1:3,i);
                             dist_x=abs(grid(1,panels(3,idx))-c4_coords_edge(1,i));
                             sgnx=sign(grid(1,panels(3,idx))-c4_coords_edge(1,i));
@@ -1381,6 +1591,47 @@ classdef class_wingsegment
                         grid(:,panels(4,idx))=grid(:,panels(4,idx))+delta_twist_3;
                     end
                 end
+                if obj.has_sp_cs
+                    if j==obj.n_ctr1_panels+sum(obj.n_le_panels)
+                         grid(:,panels(4,idx))=grid(:,panels(4,idx))+deflections_structmesh(1:3,i+1);
+                        dist_x=abs(grid(1,panels(4,idx))-c4_coords_edge(1,i+1));
+                        sgnx=sign(grid(1,panels(4,idx))-c4_coords_edge(1,i+1));
+                        %   plot3(c4_coords_edge(1,i)-grid(1,panels(4,idx)),c4_coords_edge(2,i),c4_coords_edge(3,i),'cx')
+                        dTheta=deflections_structmesh(5,i+1);
+                        Theta=R(2);
+                        dx2=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                        dz2=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                        Theta=R(3);
+                        dTheta=deflections_structmesh(6,i+1);
+                        
+                        dx3=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                        dy3=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                        delta_twist_3=[dx2+dx3;-dy3;dz2];
+                        
+                        grid(:,panels(4,idx))=grid(:,panels(4,idx))+delta_twist_3;
+                    end
+                end
+                if and(obj.has_sp_cs,~obj.has_te_cs)
+                    if j==obj.n_ctr1_panels+sum(obj.n_le_panels)+obj.n_sp_panels
+                         grid(:,panels(4,idx))=grid(:,panels(4,idx))+deflections_structmesh(1:3,i+1);
+                        dist_x=abs(grid(1,panels(4,idx))-c4_coords_edge(1,i+1));
+                        sgnx=sign(grid(1,panels(4,idx))-c4_coords_edge(1,i+1));
+                        %   plot3(c4_coords_edge(1,i)-grid(1,panels(4,idx)),c4_coords_edge(2,i),c4_coords_edge(3,i),'cx')
+                        dTheta=deflections_structmesh(5,i+1);
+                        Theta=R(2);
+                        dx2=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                        dz2=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                        Theta=R(3);
+                        dTheta=deflections_structmesh(6,i+1);
+                        
+                        dx3=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                        dy3=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                        delta_twist_3=[dx2+dx3;-dy3;dz2];
+                        
+                        grid(:,panels(4,idx))=grid(:,panels(4,idx))+delta_twist_3;
+                    end
+                end
+              
             end
             if (isempty(obj.has_te_cs)) || (obj.has_te_cs==0)
                 grid(:,panels(4,idx))=grid(:,panels(4,idx))+deflections_structmesh(1:3,i+1);
@@ -1406,10 +1657,12 @@ classdef class_wingsegment
         function grid=compute_deflected_grid(obj,panels,grid,deflections_structmesh)
 
             span_grid=0:1/obj.n_span:1;
-            n_pan=sum([obj.n_le_panels obj.n_chord  obj.n_te_panels]);
+            n_pan=sum([obj.n_le_panels obj.n_ctr1_panels obj.n_sp_panels obj.n_ctr2_panels  obj.n_te_panels]);
             
             le_ctr=1;
             le_loc_ctr=1;
+            sp_ctr=1;
+            sp_loc_ctr=1;
             te_ctr=1;
             te_loc_ctr=1;
             
@@ -1525,6 +1778,42 @@ classdef class_wingsegment
                             delta_twist_4=[dx2+dx3;dy3;dz2];
                             grid(:,panels(4,idx))=grid(:,panels(4,idx))+delta_twist_4;
                         end
+                    end
+                    if obj.has_sp_cs
+                      if j==obj.n_ctr1_panels+sum(obj.n_le_panels)
+                            grid(:,panels(4,idx))=grid(:,panels(4,idx))+deflections_structmesh(1:3,i);
+                            dist_x=abs(grid(1,panels(4,idx))-c4_coords_edge(1,i));
+                            sgnx=sign(grid(1,panels(4,idx))-c4_coords_edge(1,i));
+                            dTheta=deflections_structmesh(5,i);
+                            Theta=R(2);
+                            % plot3(c4_coords_edge(1,i)-grid(1,panels(4,idx)),c4_coords_edge(2,i),c4_coords_edge(3,i),'cx')
+                            dx2=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                            dz2=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                            dTheta=deflections_structmesh(6,i);
+                            Theta=R(3);
+                            dx3=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                            dy3=sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                            delta_twist_4=[dx2+dx3;dy3;dz2];
+                            grid(:,panels(4,idx))=grid(:,panels(4,idx))+delta_twist_4;
+                       end
+                    end
+                    if and(obj.has_sp_cs,~obj.has_te_cs)
+                      if j==obj.n_ctr1_panels+sum(obj.n_le_panels)+obj.n_sp_panels
+                            grid(:,panels(4,idx))=grid(:,panels(4,idx))+deflections_structmesh(1:3,i);
+                            dist_x=abs(grid(1,panels(4,idx))-c4_coords_edge(1,i));
+                            sgnx=sign(grid(1,panels(4,idx))-c4_coords_edge(1,i));
+                            dTheta=deflections_structmesh(5,i);
+                            Theta=R(2);
+                            % plot3(c4_coords_edge(1,i)-grid(1,panels(4,idx)),c4_coords_edge(2,i),c4_coords_edge(3,i),'cx')
+                            dx2=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                            dz2=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                            dTheta=deflections_structmesh(6,i);
+                            Theta=R(3);
+                            dx3=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                            dy3=sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                            delta_twist_4=[dx2+dx3;dy3;dz2];
+                            grid(:,panels(4,idx))=grid(:,panels(4,idx))+delta_twist_4;
+                       end
                     end
                 end
                 if  (isempty(obj.has_te_cs))||(obj.has_te_cs==0)
@@ -1668,6 +1957,45 @@ classdef class_wingsegment
                         grid(:,panels(3,idx))=grid(:,panels(3,idx))+delta_twist_3;
                     end
                 end
+                if obj.has_sp_cs
+                    if j==obj.n_ctr1_panels+sum(obj.n_le_panels)
+                        grid(:,panels(3,idx))=grid(:,panels(3,idx))+deflections_structmesh(1:3,i+1);
+                        dist_x=abs(grid(1,panels(3,idx))-c4_coords_edge(1,i+1));
+                        sgnx=sign(grid(1,panels(3,idx))-c4_coords_edge(1,i+1));
+                        %   plot3(c4_coords_edge(1,i)-grid(1,panels(3,idx)),c4_coords_edge(2,i),c4_coords_edge(3,i),'cx')
+                        dTheta=deflections_structmesh(5,i+1);
+                        Theta=R(2);
+                        dx2=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                        dz2=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                        Theta=R(3);
+                        dTheta=deflections_structmesh(6,i+1);
+                        
+                        dx3=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                        dy3=sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                        delta_twist_3=[dx2+dx3;dy3;dz2];
+                        
+                        grid(:,panels(3,idx))=grid(:,panels(3,idx))+delta_twist_3;
+                    end
+                end
+                if and(obj.has_sp_cs,~obj.has_te_cs)
+                    if j==obj.n_ctr1_panels+sum(obj.n_le_panels)+obj.n_sp_panels
+                        grid(:,panels(3,idx))=grid(:,panels(3,idx))+deflections_structmesh(1:3,i+1);
+                        dist_x=abs(grid(1,panels(3,idx))-c4_coords_edge(1,i+1));
+                        sgnx=sign(grid(1,panels(3,idx))-c4_coords_edge(1,i+1));
+                        %   plot3(c4_coords_edge(1,i)-grid(1,panels(3,idx)),c4_coords_edge(2,i),c4_coords_edge(3,i),'cx')
+                        dTheta=deflections_structmesh(5,i+1);
+                        Theta=R(2);
+                        dx2=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                        dz2=-sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                        Theta=R(3);
+                        dTheta=deflections_structmesh(6,i+1);
+
+                        dx3=-sgnx*(dist_x-(dist_x/cos(Theta)*cos(Theta+dTheta)));
+                        dy3=sgnx*(dist_x/cos(Theta)*sin(Theta+dTheta)-dist_x/cos(Theta)*sin(Theta));
+                        delta_twist_3=[dx2+dx3;dy3;dz2];
+                        grid(:,panels(3,idx))=grid(:,panels(3,idx))+delta_twist_3;
+                    end
+                end
             end
             if (isempty(obj.has_te_cs)) || (obj.has_te_cs==0)
                 grid(:,panels(3,idx))=grid(:,panels(3,idx))+deflections_structmesh(1:3,i+1);
@@ -1732,51 +2060,460 @@ classdef class_wingsegment
             end
         end
         
-        function obj=compute_grid(obj,x_max,y_max,wake)
+        function obj=compute_grid(obj,x_max,y_max,n_x_min,wake)
             
             grid3D=1;
-
-            if isempty(obj.n_span)
-                % number of spanwise panels
+            
+            % runs if nr of spanwise panels is NOT specified
+             if isempty(obj.n_span)
+            % number of spanwise panels
                 obj.n_span=ceil(obj.b/y_max);
-                % number of chordwise panels
+             end
+            % number of chordwise panels (accounting only for wing
+            % segment geometry, no control surfaces yet)
+            if isempty(obj.n_chord)
                 obj.n_chord=ceil(norm((obj.xyz_fixed(:,4)-obj.xyz_fixed(:,1))*0.5+(obj.xyz_fixed(:,3)-obj.xyz_fixed(:,2))*0.5)/x_max);
+                x_max=norm((obj.xyz_fixed(:,4)-obj.xyz_fixed(:,1))*0.5+(obj.xyz_fixed(:,3)-obj.xyz_fixed(:,2))*0.5)/obj.n_chord;
+                 if obj.n_chord<n_x_min
+                    obj.n_chord = n_x_min;
+                    x_max=norm((obj.xyz_fixed(:,4)-obj.xyz_fixed(:,1))*0.5+(obj.xyz_fixed(:,3)-obj.xyz_fixed(:,2))*0.5)/obj.n_chord;
+                 end
+
+                % runs if nr of spanwise panels is specified
             else
                 y_max = obj.b/obj.n_span;
                 x_max = norm((obj.xyz_fixed(:,4)-obj.xyz_fixed(:,1))*0.5+(obj.xyz_fixed(:,3)-obj.xyz_fixed(:,2))*0.5)/obj.n_chord;
             end
+            % Changing x_max to comply with min requirement of
+            % chordwise panels (if req is not met)
+          
             
             % compute span spacing vector
             %% TODO: optional use nonlinear cosine distribution of panels
+            
+            % vector from 0 to 1 of points which will serve as "span
+            % stations"
             span_spacing=0:1/obj.n_span:1;
             
-            % compute chordwise spacing vector
+            % vector from 0 to 1 of points which will serve as "chord
+            % stations"
             chord_spacing_ctr=0:1/obj.n_chord:1;
             
-            chord_spacing_le=[];
-            chord_spacing_te=[];
+            % Initializing a whole bunch of array that will be useful later
+            c_c_arr = zeros(1,length(span_spacing));
+            rel_start_sp = zeros(1,length(span_spacing));
+            rel_end_sp = zeros(1,length(span_spacing));
+            xsi_sp_TE_ctr2_arr = ones(1,length(span_spacing));
+            taper_correction = zeros(1,length(span_spacing));
+            xsi_sp_LE_arr = zeros(1,length(span_spacing));
+            te_sp_flap_overlap = zeros(1,length(span_spacing));
+            le_sp_flap_overlap = zeros(1,length(span_spacing));
+            overlap_flag = 0;
             
+            % ctr2 zone is assumed to exist. If there is any overlap
+            % between SP and TE surfaces at any span station, it will be
+            % set to zero.
+            ctr_2_exists = 1;
+                
+            
+            % looping once through the whole span to calculate the current
+            % chord at each span location and the taper correction at each
+            % span location
+            for i=1:length(span_spacing)
+                % computes chord of current spanwise location
+                c_c_arr(i)=obj.c_r*(1-span_spacing(i))+obj.c_t*span_spacing(i);
+                % taper correction is used whenever the CS are tapered.
+                taper_correction(i) = obj.c_r / c_c_arr(i);
+            end
+            
+            
+            % if spoiler is present, the area between LE and TE CS needs to
+            % be split into 2 sections, one before the SP, and one after.
+            if (obj.has_sp_cs)
+                
+                % if loop below allows to calculate arrays containing the
+                % LE and TE xsi coordinates of the spoilers. They are
+                % stored in arrays since will vary at each span station
+                % (Spoiler have variable orientation = 2 different xsi for
+                % inner and outer LE, which means different intermediate
+                % LE xsi's at the intermediate span stations.
+                    
+                % runs if we are reading in-house XML file
+
+                % saves inner and outer LE xsi coords of the spoiler
+                % (as specified in the XML)
+                xsi_sp_LE_arr(1) = obj.sp_device.xsi_LE_inner;
+                xsi_sp_LE_arr(end) = obj.sp_device.xsi_LE_outer;
+
+                % calculates chord between LE of wing-segment and LE of
+                % spoiler for innermost and outermost span stations
+                c_sp_LE_in = obj.c_r * obj.sp_device.xsi_LE_inner;
+                c_sp_LE_out = obj.c_t * obj.sp_device.xsi_LE_outer;
+
+                %calculates total difference between aformetioned
+                %chords (gradient of change).
+                c_sp_LE_delta = abs(c_sp_LE_in-c_sp_LE_out);
+
+                % calculates all chords between LE of wing-segment and LE of
+                % spoiler for intermediate span stations
+                c_sp_LE_intermediate = c_sp_LE_in - (c_sp_LE_delta * span_spacing(2:end-1));
+
+                % calculates spoiler LE xsi coords for all intermediate
+                % span stations
+                xsi_sp_LE_arr(2:end-1) = rdivide(c_sp_LE_intermediate,c_c_arr(2:end-1));
+
+                % calculates spoiler TE xsi coords for all span
+                % stations. It assumes a tapered spoiler, but
+                % corrections are introduced later on to obtain the
+                % correct value in case of untapered spoiler.
+                xsi_sp_TE_arr = xsi_sp_LE_arr + obj.sp_device.hinge;
+                
+                % checks whether corrections due to untapered spoiler are
+                % necessary
+                
+                % if tapered, the code below does not alter relevant values
+                if obj.sp_device.is_tapered == 1
+                    sp_taper_correction = ones(1,length(span_spacing));
+                    xsi_sp_TE_ctr2_arr = times(xsi_sp_TE_ctr2_arr, xsi_sp_TE_arr);
+                    
+                % if untapered, the actual spoiler TE xsi coords are
+                % calculated by applying a correction factor
+                % (taper_correction)
+                else
+                    sp_taper_correction = taper_correction;
+                    xsi_sp_TE_ctr2_arr = xsi_sp_LE_arr + times((xsi_sp_TE_arr-xsi_sp_LE_arr), sp_taper_correction); 
+                end
+                
+                % looping over all span sections to calculate dimensions
+                % and chords of areas which will be divided into panels/
+                
+                % rel_start_sp is the relative chord (min 0, max 1) between
+                % the TE of the LE surface and the LE of the spoilers. It is
+                % calculated at each span station (array)
+                for i=1:length(span_spacing)
+                    
+                    % if LE surfaces are present, rel_start_sp is affected.
+                    % Corrections are applied in case the LE surface is
+                    % untapered.
+                    if(obj.has_le_cs)
+                        if obj.le_device.is_tapered==1
+                            LE_correction = sum(obj.le_device.hinge);
+                        elseif obj.le_device.is_tapered==0
+                            LE_correction = sum(obj.le_device.hinge)*obj.c_r/c_c_arr(i);
+                        end
+                        rel_start_sp(i) = (xsi_sp_LE_arr(i) - LE_correction);
+                    else
+                        rel_start_sp(i) = xsi_sp_LE_arr(i);
+                    end
+                
+                    
+                    % same as above, but for rel_end_sp, which is
+                    % influenced by TE surfaces.
+                    
+                    % rel_end_sp is the relative chord (min 0, max 1) between
+                    % the TE of the spoiler and the LE of the TE surface. It is
+                    % calculated at each span station (array)
+                    if (obj.has_te_cs)
+                        
+                        % if LE surfaces are present, rel_end_sp is affected.
+                        % Corrections are applied in case the TE surface is
+                        % untapered.
+                        if obj.te_device.is_tapered==1
+                            TE_correction = sum(obj.te_device.hinge);
+                        elseif obj.te_device.is_tapered==0
+                            TE_correction = sum(obj.te_device.hinge)*obj.c_r/c_c_arr(i);
+                        end
+                        
+                        % corrections are also necessary in case the
+                        % spoiler is untapered.
+                        if obj.sp_device.is_tapered==1
+                            rel_end_sp(i) = (1 - xsi_sp_TE_arr(i) - TE_correction);
+                        elseif obj.sp_device.is_tapered==0
+                            rel_end_sp(i) = (1 - (xsi_sp_LE_arr(i) + obj.sp_device.hinge*obj.c_r/c_c_arr(i)) - TE_correction);
+                        end
+                        
+                    % in case TE surfaces are not present. Corrections in
+                    % case of untaepered spoilers still need to be applied
+                    else
+                        if obj.sp_device.is_tapered==1
+                            rel_end_sp(i) = (1 - xsi_sp_TE_arr(i));
+                        elseif obj.sp_device.is_tapered==0
+                            rel_end_sp(i) = 1 - (xsi_sp_LE_arr(i) + obj.sp_device.hinge*obj.c_r/c_c_arr(i));
+                        end
+                    end
+                    
+                    if (obj.has_te_cs)
+                        % checks whether TE of spoiler overlaps LE of TE
+                        % control surface (at current span station)
+                        if 1 - xsi_sp_TE_ctr2_arr(i) - TE_correction < 0
+                            %if overlap occurs, overlap flag of current span
+                            %station "i" is switched from 0 to 1.
+                            te_sp_flap_overlap(i) = 1;
+
+                            % overlap will either span the entire surfaces, or
+                            % it will span only a portion. In the first case,
+                            % ctr2 does not exist. In the second, we end up
+                            % with triangular elements, so an error message is
+                            % thrown. Hence ctr2 has no reason to exist in case
+                            % of ANY overlap at ANY span station.
+                            ctr_2_exists = 0;
+
+                            % LE of spoiler can only overlap TE surface if the
+                            % TE of the spoiler does so as well
+
+                            if 1 - xsi_sp_LE_arr(i) - TE_correction < 0
+                                le_sp_flap_overlap(i) = 1;
+                            end
+                        end
+                    end
+                end
+                
+                
+                %ctr stands for center. Center 1 and 2 are the regions
+                %respectively between LE surface and spoiler, and between
+                %spoiler and TE surface. In case spoilers are absent, only
+                %ctr1 exists.
+                
+                % since rel_start_sp and rel_end_sp are realative chords
+                % (between 0 and 1), they represent the percentage of
+                % segment taken up by ctr1 and ctr2 respectively.
+                % Multiplying them by the nr of chord panels we would have
+                % assigned to the whole segment surface gives us the panels
+                % to be assigned to ctr1 and ctr2.
+                n_chord_panels_ctr_1 = ceil(rel_start_sp(1) * obj.n_chord);
+                n_chord_panels_ctr_2 = ceil((rel_end_sp(1)) * obj.n_chord * ctr_2_exists);
+                
+                obj.n_ctr1_panels = n_chord_panels_ctr_1;
+                obj.n_ctr2_panels = n_chord_panels_ctr_2;
+                
+                % relative spacing of chord-wise points WITHIN REFERENCE
+                % FRAME OF chord_spacing_ctr_1
+                chord_spacing_ctr_1 = linspace(0,1,n_chord_panels_ctr_1+1);
+                
+                % calculates various grid size related quantities,
+                % depending on whether ctr2 exists.
+                if ctr_2_exists
+                    chord_spacing_ctr_2 = linspace(0,1,n_chord_panels_ctr_2+1);
+                    n_chordwise_points = length(chord_spacing_ctr_1) + length(chord_spacing_ctr_2);
+                    n_chordwise_panels = n_chordwise_points -2;
+                    size_grid_ctr_1=length(chord_spacing_ctr_1)*length(span_spacing);
+                    size_grid_ctr_2=length(chord_spacing_ctr_2)*length(span_spacing);
+                    
+                else
+                    n_chordwise_points = length(chord_spacing_ctr_1);
+                    n_chordwise_panels = n_chordwise_points -1;
+                    size_grid_ctr_1=length(chord_spacing_ctr_1)*length(span_spacing);
+                    size_grid_ctr_2= 0;
+                end
+                
+                
+                % all the code below (until the else which runs if no
+                % spoielrs are present) is related to the detection and
+                % handling of overlaps between the spoiler and trailing
+                % edge surface.
+                
+                % creating a new region (like ctr1 or ctr2) to handle
+                % overlap would have resulted in a lot of extra code being
+                % added to handle exceptions. It was simpler to treat the
+                % ovrerlap region as a "special region" of the flaps. While
+                % less elegant, this solution is simpler and easier to
+                % implement.
+                
+                if sum(te_sp_flap_overlap) > 0
+                    
+                    % checks whether overlap occurs at all span stations.
+                    % If it doesn't, we will end up with undesireable
+                    % triangular elements. A warning message is raised, and
+                    % the user is prompted to modify the XML/CPACS in order
+                    % to guarantee a full overlap.
+                    if sum(te_sp_flap_overlap) ~= length(te_sp_flap_overlap)
+                        msg = ['Trailing edge of the Spoiler does not fully overlap with the leading edge of the flap'...
+                        'This would result in undesireable triangular elements. Please modify the XML or CPACS file to ensure a full overlap'];
+                        error(msg);
+                    end
+                    
+                    % if the leading of the spoiler is also partially
+                    % overlapping the flap, we might have triangular
+                    % elements
+                    if sum(le_sp_flap_overlap) > 0
+                        
+                        % if the overlap between the LE of the spoiler and
+                        % the flap is only partial, triangular elements
+                        % will result. Like above, a similar error message
+                        % is raised
+                        if sum(le_sp_flap_overlap) < length(le_sp_flap_overlap)
+                            msg = ['Leading edge of the Spoiler does not fully overlap with the leading edge of the flap'...
+                        'This would result in undesireable triangular elements. Please modify the XML or CPACS file to either ensure a full'...
+                        'overlap, or no overlap at all'];
+                        error(msg);
+                        
+                        % if the overlap between the LE of the spoiler and
+                        % the flap is full, a warning message is raised,
+                        % since this configuration is unusual and the user
+                        % might have set it up by accident
+                        else
+                            msg = ['The spoiler is completely overlapping the TE surface (both the LE and TE of the spoiler are behind the LE of the flap'...
+                                'Are you sure that this is what you were trying to design?'];
+                            warning(msg);
+                        end
+                    end
+                    
+                    % if the code has run this far, no errors were raised,
+                    % hence the overlap can be considered "proper"
+                    
+                    overlap_flag = 1;
+                    
+                    
+                end
+                
+                
+            % if no spoilers are present chord_spacing_ctr_1 is used as the
+            % default spacing, and chord_spacing_ctr_2 is set to zero.
+            
+            % code below is basically snippets of the code that ran in case
+            % spoilers were present, only it accounts for the fact that
+            % none are present. All the comments made to code sections
+            % above apply to the equivalent code snippets below.
+            else
+                rel_start_sp = ones(1,length(span_spacing));
+                
+                for i=1:length(span_spacing)
+                    if(obj.has_le_cs)
+                        if obj.le_device.is_tapered==1
+                            LE_correction = sum(obj.le_device.hinge);
+                        elseif obj.le_device.is_tapered==0
+                            LE_correction = sum(obj.le_device.hinge)*obj.c_r/c_c_arr(i);
+                        end
+                        rel_start_sp(i) = rel_start_sp(i) - LE_correction;
+                    end
+
+                    if (obj.has_te_cs)
+                        if obj.te_device.is_tapered==1
+                            TE_correction = sum(obj.te_device.hinge);
+                        elseif obj.te_device.is_tapered==0
+                            TE_correction = sum(obj.te_device.hinge)*obj.c_r/c_c_arr(i);
+                        end
+                        rel_start_sp(i) = rel_start_sp(i) - TE_correction;
+                    end
+                    
+                    n_chord_panels_ctr_1 = ceil(rel_start_sp(1) * obj.n_chord);
+
+                    chord_spacing_ctr_1 = linspace(0,1,n_chord_panels_ctr_1+1);
+
+                    n_chordwise_points = length(chord_spacing_ctr_1);
+                    n_chordwise_panels = n_chord_panels_ctr_1;
+                    obj.n_ctr1_panels = n_chord_panels_ctr_1;
+
+                    size_grid_ctr_1=length(chord_spacing_ctr_1)*length(span_spacing);
+
+                    ctr_2_exists = 0;
+                    size_grid_ctr_2= 0;
+                    obj.n_ctr2_panels=[];
+                end
+            end
+
+            % initialize spacing vectors specifically for control surfaces.
+            % functionalities are identical to span and chord spacing of
+            % main wing, but these are in the reference system of their
+            % respective control surface
+            chord_spacing_le = [];
+            chord_spacing_te = [];
+            chord_spacing_sp = [];
+            
+            
+            % initialize grid size of control surfaces
             size_grid_le=0;
             size_grid_te=0;
+            size_grid_sp=0;
             
-            n_chordwise_points=obj.n_chord+1;
-            n_chordwise_panels=obj.n_chord;
             
+            % initialize nr of panels for control surfaces
             obj.n_le_panels=[];
             obj.n_te_panels=[];
+            obj.n_sp_panels=[];
             
+            
+            if(obj.has_sp_cs)
+                
+                n_sp_devices=length(obj.xyz_sp_device(:,1,1));
+                
+                % loops over all SP CS and uses same criteria as in main
+                % wing to find nr of panels (chordwise) necessary to
+                % represent the spoiler
+                for j=1:n_sp_devices
+                    obj.n_sp_panels(j)=ceil(norm((obj.xyz_sp_device(j,:,4)-obj.xyz_sp_device(j,:,1))*0.5+(obj.xyz_sp_device(j,:,3)-obj.xyz_sp_device(j,:,2))*0.5)/x_max);
+                    
+                    % resizing of nr of panels needed for spoiler is done
+                    % looking at the root of the segment.
+                    if overlap_flag == 1
+                        % ratio_sp_overlap is the ratio of the
+                        % non-overlapping spoiler root chord over the whole
+                        % spoiler root chord.
+                        original_n_sp_panels = obj.n_sp_panels(j);
+                        ratio_sp_overlap = (obj.sp_device(j).hinge -(sum(obj.te_device.hinge)-(1-xsi_sp_TE_ctr2_arr(1))))/obj.sp_device(j).hinge;
+                        obj.n_sp_panels(j) = ceil(obj.n_sp_panels(j) * ratio_sp_overlap);
+                    end
+                end
+                
+                % updates grid sizes of SP surface and main wing to account
+                % for presence of panels within the CS.
+                size_grid_sp=length(span_spacing)*(sum(obj.n_sp_panels)+length(obj.n_sp_panels));
+                n_chordwise_points=n_chordwise_points+sum(obj.n_sp_panels)+length(obj.n_sp_panels);
+                n_chordwise_panels=n_chordwise_panels+sum(obj.n_sp_panels);
+            end
+            
+            
+            
+            % runs if segment has a LE CS
             if(obj.has_le_cs)
+                
+                % calculates taper correction due to presence of leading
+                % edge surfaces (to be used later). This one is actually
+                % applied when the surface IS TAPERED
+                if obj.le_device.is_tapered == 0
+                    le_taper_correction = ones(1,length(span_spacing));
+                else
+                    le_taper_correction = taper_correction;
+                end
+                
                 n_le_devices=length(obj.xyz_le_device(:,1,1));
+                
+                % loops over all LE CS and uses same criteria as in main
+                % wing to find nr of panels (chordwise) necessary to
+                % represent the leading edge
                 for j=1:n_le_devices
                     obj.n_le_panels(j)=ceil(norm((obj.xyz_le_device(j,:,4)-obj.xyz_le_device(j,:,1))*0.5+(obj.xyz_le_device(j,:,3)-obj.xyz_le_device(j,:,2))*0.5)/x_max);
                 end
+                
+                % updates grid sizes of LE surface and main wing to account
+                % for presence of panels within the CS.
                 size_grid_le=length(span_spacing)*(sum(obj.n_le_panels)+length(obj.n_le_panels));
                 n_chordwise_points=n_chordwise_points+sum(obj.n_le_panels)+length(obj.n_le_panels);
                 n_chordwise_panels=n_chordwise_panels+sum(obj.n_le_panels);  
+                
+            % still defines a LE taper correction even if there are no LE surfaces.
+            % Done in order to avoid errors later on when the variable is called.
+            else
+                le_taper_correction = ones(1,length(span_spacing));
             end
             
+            % runs if segment has a TE CS
             if(obj.has_te_cs)
+                
+                % taper corrections to be applied in case the TE device is UNTAPERED
+                if obj.te_device.is_tapered == 1
+                    te_taper_correction = ones(1,length(span_spacing));
+                else
+                    te_taper_correction = taper_correction;
+                end
+                
                 n_te_devices=length(obj.xyz_te_device(:,1,1));
+                n_sp_overlap_panels = zeros(1,n_te_devices);
+                n_te_free_panels = zeros(1,n_te_devices);
+                
+                % loops over all TE CS and uses same criteria as in main
+                % wing to find nr of panels (chordwise) necessary to
+                % represent the trailing edge
                 for j=1:n_te_devices
                     %% Problem: ceil is unstable 4.000000 will be 5
                     %% set proper limit
@@ -1786,52 +2523,118 @@ classdef class_wingsegment
                     else
                         obj.n_te_panels(j)=ceil(norm((obj.xyz_te_device(j,:,4)-obj.xyz_te_device(j,:,1))*0.5+(obj.xyz_te_device(j,:,3)-obj.xyz_te_device(j,:,2))*0.5)/x_max);
                     end
+                    
+                    
+                    if overlap_flag == 1
+                        % ratio_sp_overlap is the ratio of the non-overlapping spoiler root chord over the whole
+                        % spoiler root chord.
+                        n_sp_overlap_panels(j) = ceil(original_n_sp_panels * (1-ratio_sp_overlap));
+                        
+                        % ratio_flap_freeis the ratio of the non-overlapping spoiler root chord over the whole
+                        % spoiler root chord.
+                        ratio_flap_free = (1-xsi_sp_TE_ctr2_arr(1))/obj.te_device(j).hinge;
+                        n_te_free_panels(j) = ceil(obj.n_te_panels(j)*ratio_flap_free);
+                        obj.n_te_panels(j) = n_te_free_panels(j) + n_sp_overlap_panels(j);
+                        obj.n_te_panels_overlap = n_sp_overlap_panels;
+                        obj.n_te_panels_free = n_te_free_panels;
+                    end
+                    
                 end
+                
+                % updates grid sizes of TE surface and main wing to account
+                % for presence of panels within the CS.
                 size_grid_te=length(span_spacing)*(sum(obj.n_te_panels)+length(obj.n_te_panels));
                 n_chordwise_points=n_chordwise_points+sum(obj.n_te_panels)+length(obj.n_te_panels);
                 n_chordwise_panels=n_chordwise_panels+sum(obj.n_te_panels);
+                
             end
             
-            grid_len=length(span_spacing)*length(chord_spacing_ctr)+size_grid_le+size_grid_te;
+            % initializes all grid variables
+            grid_len = size_grid_ctr_1 + size_grid_ctr_2 + size_grid_le + size_grid_te + size_grid_sp;
             grid=zeros(3,grid_len);
             grid_flat=zeros(3,grid_len);
             grid_upper=zeros(3,grid_len);
             grid_lower=zeros(3,grid_len);
             te_idx=zeros(1,grid_len);
             
+            % initializes counter of grid points
             k=1;
             
+            % iterates over each spanwise station
             for i=1:length(span_spacing)
-                % compute current chord
+                
+                % computes chord of current spanwise location
                 c_c=obj.c_r*(1-span_spacing(i))+obj.c_t*span_spacing(i);
-                % compute relative
+                
+                % computes chord of LE CS relative to ROOT CHORD, not the
+                % current one
                 c_le_device_cs=[0 cumsum(obj.c_le_device)]/obj.c_r;
                 
+                % initializes current chord position (0 to 1) wrt LE CS
+                % reference frame
                 relative_chord_pos_le=0;
                 
+                % initializes previous chord position within LE CS and
+                % previous skeleton point.
                 relative_chord_pos_prv=0;
                 skeleton_point_prv=0;
+                
+                % runs if wing segment has LE CS
                 if(obj.has_le_cs)
+                    
+                    % iterate over all LE CS
                     for j=1:n_le_devices
-                        % compute chord spacing
+                        
+                        % compute chord spacing vector (define coords from
+                        % 0 to 1 of each chord station)
                         chord_spacing_le=0:1/ obj.n_le_panels(j):1;
+                        
+                        % compute xyz coords of r1 and r2. They are the
+                        % points resulting from the intersection between
+                        % the Leading and Trailing edges of the LEADING
+                        % EDGE CONTROL SURFACE and the current spanwise
+                        % station we are looking at.
                         r1=obj.xyz_le_device(j,:,1)+span_spacing(i)*(obj.xyz_le_device(j,:,2)-obj.xyz_le_device(j,:,1));
                         r2=obj.xyz_le_device(j,:,4)+span_spacing(i)*(obj.xyz_le_device(j,:,3)-obj.xyz_le_device(j,:,4));
+                        
+                        % iterate over all chord stations within current
+                        % span stations within LE CS.
                         for ii=1:length(chord_spacing_le)
-                            if ii>2
+                            
+                            % if current point is not the starting point,
+                            % previous point is set, else both prv and
+                            % currents points are zero.
+                            if ii>1
                                 relative_chord_pos_prv=relative_chord_pos_le;
                                 skeleton_point_prv=skeleton_point2;
                             end
+                            
+                            
+                            % if CS LE is tapered, the relative chord position of the current point is calulcated
+                            % by taking the starting point of the current LE CS (if no slotted LE CS are present it is zero),
+                            % then adding the chord spacing of the current point (0 to 1 in CS frame) multiplied by the
+                            % chord of the current LE device and then scaled with the root chord of the wing segment.
+                            
+                            % if CS LE is NOT tapered, the relative chord position of the current point is calulcated
+                            % by taking the starting point of the current LE CS (if no slotted LE CS are present it is zero) multiplied with the ratio between the
+                            % root chord and current chord, then adding the chord spacing of the current point (0 to 1 in CS frame) multiplied by the
+                            % chord of the current LE device and then scaled with the current chord of the wing segment
                             if obj.le_device.is_tapered==1
                                 relative_chord_pos_le=c_le_device_cs(j)+chord_spacing_le(ii)*obj.c_le_device(j)/obj.c_r;
                             else
                                 relative_chord_pos_le=c_le_device_cs(j)*obj.c_r/c_c+chord_spacing_le(ii)*obj.c_le_device(j)/c_c;
                             end
+                            
+                            % computes skeleton points
                             skeleton_point=obj.compute_skeleton_point(relative_chord_pos_le,span_spacing(i));
                             skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos_le,relative_chord_pos_prv,skeleton_point_prv, span_spacing(i));
-%                           if evalin('base','type') == 2
-                                skeleton_point=skeleton_point2;
-%                           end
+
+                            skeleton_point=skeleton_point2;
+
+
+                            % calculates xyz of current grid point (current
+                            % chord station and current span station on
+                            % current LE CS)
                             grid(:,k)=r1+chord_spacing_le(ii)*(r2-r1);
                             grid_flat(:,k)=grid(:,k);
                             
@@ -1846,40 +2649,55 @@ classdef class_wingsegment
                             end
                             grid(2,k)=grid(2,k)-skeleton_point*sind(obj.dihed);
                             grid(3,k)=grid(3,k)+skeleton_point*cosd(obj.dihed);
+                            
+                            % increases grid point counter by 1
                             k=k+1;
                         end
                     end
                 end
                 
-                r1=obj.xyz_fixed(:,1)+span_spacing(i)*(obj.xyz_fixed(:,2)-obj.xyz_fixed(:,1));
-                r2=obj.xyz_fixed(:,4)+span_spacing(i)*(obj.xyz_fixed(:,3)-obj.xyz_fixed(:,4));
-                for j=1:length(chord_spacing_ctr)
+                % Once all grid points at current span station have been
+                % added all along the LE CS chord, we move to the main wing
+
+                % same r1 and r2 concept as the one described in LE CS.
+                % These however refer to the main wing
+                
+                r1_ext=obj.xyz(:,1)+span_spacing(i)*(obj.xyz(:,2)-obj.xyz(:,1));
+                r2_ext=obj.xyz(:,4)+span_spacing(i)*(obj.xyz(:,3)-obj.xyz(:,4));
+                
+                % iterate over all chord stations
+                for j=1:length(chord_spacing_ctr_1)
                     
-                    relative_chord_pos=sum(obj.c_le_device)/c_c+chord_spacing_ctr(j)*(c_c-sum(obj.c_te_device)-sum(obj.c_le_device))/c_c;
-                    if j>2
-                        relative_chord_pos_prv=sum(obj.c_le_device)/c_c+chord_spacing_ctr(j-1)*(c_c-sum(obj.c_te_device)-sum(obj.c_le_device))/c_c;
+                    % calculates relative chord position of chord-wise
+                    % points at current span station within ctr1 zone.
+                    % Basically defines points according to
+                    % chord_spacing_ctr_1 within ctr1, so between the TE of
+                    % the LE device and the LE of the spoiler. Taper
+                    % corrections are applied both explicitly
+                    % (le_taper_correction below) and implicitly (within
+                    % rel_start_sp)
+                    relative_chord_pos=sum(obj.c_le_device)/(le_taper_correction(i)*c_c) +chord_spacing_ctr_1(j)*rel_start_sp(i);
+                    
+                    % Stores previous chord position and accounts for taper
+                    % of TE CS when looking at chord position on the main
+                    % wing
+                    if j>1
+                        relative_chord_pos_prv=sum(obj.c_le_device)/(le_taper_correction(i)*c_c)+chord_spacing_ctr_1(j-1)*rel_start_sp(i);
                         skeleton_point_prv=skeleton_point2;
-                        if obj.has_te_cs==1
-                            if obj.te_device.is_tapered==1
-                                %% careful only untapered te_device
-                                relative_chord_pos_prv=sum(obj.c_le_device)/c_c+chord_spacing_ctr(j-1)*(c_c-sum(obj.c_te_device)*c_c/obj.c_r-sum(obj.c_le_device))/c_c;
-                            end
-                        end
                     end
-                    
-                    if obj.has_te_cs==1
-                        if obj.te_device.is_tapered==1
-                            %% careful only untapered te_device
-                            relative_chord_pos=sum(obj.c_le_device)/c_c+chord_spacing_ctr(j)*(c_c-sum(obj.c_te_device)*c_c/obj.c_r-sum(obj.c_le_device))/c_c;
-                        end
-                    end
+                           
                     skeleton_point=obj.compute_skeleton_point(relative_chord_pos,span_spacing(i));
-                    
                     skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos,relative_chord_pos_prv,skeleton_point_prv, span_spacing(i));
-%                   if evalin('base','type') == 2
-                        skeleton_point=skeleton_point2;
-%                   end
-                    grid(:,k)=r1+chord_spacing_ctr(j)*(r2-r1);
+
+                    skeleton_point=skeleton_point2;
+
+
+                    % calculates xyz of current grid point (current
+                    % chord station and current span station on
+                    % main wing)
+                    
+                    grid(:,k)=r1_ext+(relative_chord_pos) * (r2_ext - r1_ext);
+                    
                     grid_flat(:,k)=grid(:,k);
                     if grid3D==1
                        [lower_point,upper_point]=obj.compute_thickness_point(relative_chord_pos,span_spacing(i));
@@ -1892,32 +2710,60 @@ classdef class_wingsegment
                     end
                     grid(2,k)=grid(2,k)-skeleton_point*sind(obj.dihed);
                     grid(3,k)=grid(3,k)+skeleton_point*cosd(obj.dihed);
+                    
+                    % increases grid point counter by 1
                     k=k+1;
                 end
                 
-                if(obj.has_te_cs)
-                    c_te_device_cs=[0 cumsum(obj.c_te_device)]/obj.c_r;
-                    for j=1:n_te_devices
-                        chord_spacing_te=0:1/obj.n_te_panels(j):1;
-                        r1=obj.xyz_te_device(j,:,1)+span_spacing(i)*(obj.xyz_te_device(j,:,2)-obj.xyz_te_device(j,:,1));
-                        r2=obj.xyz_te_device(j,:,4)+span_spacing(i)*(obj.xyz_te_device(j,:,3)-obj.xyz_te_device(j,:,4));
-                        for ii=1:length(chord_spacing_te)
-                            if ii>2
+                % runs if wing segment has spoiler
+                if(obj.has_sp_cs)
+                    
+                    % iterate over all spoilers
+                    for j=1:n_sp_devices
+                        
+                        % compute chord spaciing vector (define coords from
+                        % 0 to 1 of each chord station)
+                        chord_spacing_sp=0:1/obj.n_sp_panels(j):1;
+                        
+                        % same as r1 and r2 coords previous illustrated,
+                        % only for spoilers
+                        r1=obj.xyz_sp_device(j,:,1)+span_spacing(i)*(obj.xyz_sp_device(j,:,2)-obj.xyz_sp_device(j,:,1));
+                        r2=obj.xyz_sp_device(j,:,4)+span_spacing(i)*(obj.xyz_sp_device(j,:,3)-obj.xyz_sp_device(j,:,4));
+                        
+                        % iterate over all chord stations 
+                        for ii=1:length(chord_spacing_sp)
+                            
+                            % saves prev relative chord pos and skeleton point
+                            if ii>1
                                 relative_chord_pos_prv=relative_chord_pos;
                                 skeleton_point_prv=skeleton_point2;
                             end
-                            if obj.te_device.is_tapered==1
-                                relative_chord_pos=c_te_device_cs(j)+chord_spacing_te(ii)*sum(obj.c_te_device(j))/obj.c_r+sum(obj.c_le_device)/c_c+(c_c-sum(obj.c_te_device)*c_c/obj.c_r-sum(obj.c_le_device))/c_c;
+                            
+                            % relative chord pos of chord-wise points at
+                            % current span station within of spoiler
+                            % surface. Contained between LE of spoiler and
+                            % TE of spoiler.
+                            
+                            if overlap_flag == 0
+                                relative_chord_pos = xsi_sp_LE_arr(i) + chord_spacing_sp(ii) * obj.sp_device.hinge * sp_taper_correction(i);
+                                grid(:,k)=r1+chord_spacing_sp(ii)*(r2-r1);
                             else
-                                relative_chord_pos=c_te_device_cs(j)*obj.c_r/c_c+chord_spacing_te(ii)*sum(obj.c_te_device(j))/c_c+sum(obj.c_le_device)/c_c+(c_c-sum(obj.c_te_device)-sum(obj.c_le_device))/c_c;
+                                % te_surface_LE is the flap leading edge xsi coordinate at the current span
+                                % station (code snippet taken from TE surface if loop below)
+                                te_surface_LE = (1-obj.te_device.hinge*te_taper_correction(i));
+                                
+                                % spoiler is limited to region between LE of spoiler and LE of flap
+                                relative_chord_pos = xsi_sp_LE_arr(i) + (te_surface_LE - xsi_sp_LE_arr(i))*chord_spacing_sp(ii);
+                                
+                                grid(:,k)=r1+chord_spacing_sp(ii)*(te_surface_LE - xsi_sp_LE_arr(i))/(obj.sp_device.hinge * sp_taper_correction(i))*(r2-r1);
                             end
+                            
                             skeleton_point=obj.compute_skeleton_point(relative_chord_pos,span_spacing(i));  
                             skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos,relative_chord_pos_prv,skeleton_point_prv,span_spacing(i));  
 
-%                           if evalin('base','type') == 2
-                                skeleton_point=skeleton_point2;
-%                           end
-                            grid(:,k)=r1+chord_spacing_te(ii)*(r2-r1);
+                            skeleton_point=skeleton_point2;
+                                
+                            
                             grid_flat(:,k)=grid(:,k);
                             if grid3D==1
                                 [lower_point,upper_point]=obj.compute_thickness_point(relative_chord_pos,span_spacing(i));
@@ -1934,7 +2780,162 @@ classdef class_wingsegment
                         end
                     end
                 end
+        
+                % Once all grid in the spoilers have been
+                % added all along the spoiler chord, we move to the section
+                % of the wing between the spoiler and the control surface,
+                % but only if this section is actually present. If the
+                % spoiler overlaps a TE CS, or if the spoiler is absent,
+                % we go directly to the TE
+                
+                if ctr_2_exists
+
+                    % iterate over all chord stations
+                    for j=1:length(chord_spacing_ctr_2)
+                        
+                        % starting from spoiler TE, calculates relative
+                        % chord position of chord-wise points. Applies
+                        % chord_spacing_ctr_2 spacing to rel_end_sp 
+                        relative_chord_pos = xsi_sp_TE_ctr2_arr(i) + chord_spacing_ctr_2(j)*(rel_end_sp(i));
+                        
+                        % Stores previous chord position and accounts for taper
+                        % of TE CS when looking at chord position on the main
+                        % wing
+                        if j>1
+                            relative_chord_pos_prv=xsi_sp_TE_ctr2_arr(i) + chord_spacing_ctr_2(j-1)*(rel_end_sp(i));
+                            skeleton_point_prv=skeleton_point2;
+                        end
+
+                        skeleton_point=obj.compute_skeleton_point(relative_chord_pos,span_spacing(i));
+
+                        skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos,relative_chord_pos_prv,skeleton_point_prv, span_spacing(i));
+
+                        skeleton_point=skeleton_point2;
+                        
+                        % the r1_ext and r2_ext are calculated within the
+                        % spoiler section. This does not cause issues as
+                        % ctr2 can only exist if the spoilers exist as
+                        % well. Moreover, the current span station is
+                        % always the same for both.
+                        grid(:,k)=r1_ext + relative_chord_pos * (r2_ext - r1_ext);
+                        
+                        grid_flat(:,k)=grid(:,k);
+                        if grid3D==1
+                           [lower_point,upper_point]=obj.compute_thickness_point(relative_chord_pos,span_spacing(i));
+                           grid_upper(:,k)=grid(:,k);
+                           grid_lower(:,k)=grid(:,k);
+                           grid_upper(2,k)=grid(2,k)-upper_point*sind(obj.dihed);
+                           grid_upper(3,k)=grid(3,k)+upper_point*cosd(obj.dihed);
+                           grid_lower(2,k)=grid(2,k)-lower_point*sind(obj.dihed);
+                           grid_lower(3,k)=grid(3,k)+lower_point*cosd(obj.dihed);
+                        end
+                        grid(2,k)=grid(2,k)-skeleton_point*sind(obj.dihed);
+                        grid(3,k)=grid(3,k)+skeleton_point*cosd(obj.dihed);
+
+                        % increases grid point counter by 1
+                        k=k+1;
+                    end
+                end
+
+
+                % runs if TE CS is present on wing segment
+                if(obj.has_te_cs)
+                    
+                    % loops over all TE devices
+                    for j=1:n_te_devices
+                        
+                        % defines chord spacing (0 to 1, in CS TE reference
+                        % frame) of all chord stations
+                        chord_spacing_te=0:1/obj.n_te_panels(j):1;
+                        chord_spacing_te_overlap = 0:1/n_sp_overlap_panels(j):1;
+                        chord_spacing_te_free = 0:1/n_te_free_panels(j):1;
+                        % the first element of chord_spacing_te_free is
+                        % excluded since [1] of chord_spacing_te_overlap
+                        % and [0] of chord_spacing_te_free represent the
+                        % same point.
+                        chord_spacing_te_free = chord_spacing_te_free(2:end);
+                        
+                        % same as r1 and r2 coords previous illustrated,
+                        % only for CS TE.
+                        r1=obj.xyz_te_device(j,:,1)+span_spacing(i)*(obj.xyz_te_device(j,:,2)-obj.xyz_te_device(j,:,1));
+                        r2=obj.xyz_te_device(j,:,4)+span_spacing(i)*(obj.xyz_te_device(j,:,3)-obj.xyz_te_device(j,:,4));
+                        
+                        if overlap_flag == 1
+                            r1_overlap = r1;
+                            
+                            rel_chord_overlap =  (xsi_sp_TE_ctr2_arr(i)-(1-obj.te_device.hinge*te_taper_correction(i)))/(obj.te_device.hinge*te_taper_correction(i));
+                            r2_overlap = r1 + rel_chord_overlap*(r2-r1);
+%                             r2_overlap = obj.xyz_sp_device(1,:,4)+span_spacing(i)*(obj.xyz_sp_device(1,:,3)-obj.xyz_sp_device(1,:,4));
+                            
+                            r1_free = r2_overlap;
+                            r2_free = r2;
+                        end
+                        
+                        % loops over all chord stations within current span
+                        % station (j)
+                        for ii=1:length(chord_spacing_te)
+                            
+                            % saves prev chord pos and prev skeleton point
+                            if ii>1
+                                relative_chord_pos_prv=relative_chord_pos;
+                                skeleton_point_prv=skeleton_point2;
+                            end
+                                   
+                            if overlap_flag == 0
+                                relative_chord_pos = (1-obj.te_device.hinge*te_taper_correction(i)) + chord_spacing_te(ii) * obj.te_device.hinge * te_taper_correction(i);
+                                grid(:,k)=r1+chord_spacing_te(ii)*(r2-r1);
+                            else
+                                % te_surface_LE is the flap leading edge xsi coordinate at the current span
+                                % station (code snippet taken from TE surface if loop below)
+                                te_surface_LE = (1-obj.te_device.hinge*te_taper_correction(i));
+
+                                % checking whether we are looking at the
+                                % overlapping region or the free one
+                                if ii<= length(chord_spacing_te_overlap)
+                                    relative_chord_pos = te_surface_LE + (xsi_sp_TE_ctr2_arr(i)-te_surface_LE)*chord_spacing_te_overlap(ii);
+                                    grid(:,k)=r1_overlap+chord_spacing_te_overlap(ii)*(r2_overlap-r1_overlap);
+                                else
+                                    ii_loc = ii - length(chord_spacing_te_overlap);
+                                    relative_chord_pos = xsi_sp_TE_ctr2_arr(i) + (1-xsi_sp_TE_ctr2_arr(i)) * chord_spacing_te_free(ii_loc);
+                                    grid(:,k)=r1_free+chord_spacing_te_free(ii_loc)*(r2_free-r1_free);
+                                end
+                            end
+                            
+                            
+                            
+                            
+                            skeleton_point=obj.compute_skeleton_point(relative_chord_pos,span_spacing(i));  
+                            skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos,relative_chord_pos_prv,skeleton_point_prv,span_spacing(i));  
+
+                            skeleton_point=skeleton_point2;
+                            
+                            % calculates xyz of current grid point (current
+                            % chord station and current span station on
+                            % current TE device)
+
+                            
+                            grid_flat(:,k)=grid(:,k);
+                            if grid3D==1
+                                [lower_point,upper_point]=obj.compute_thickness_point(relative_chord_pos,span_spacing(i));
+                                grid_upper(:,k)=grid(:,k);
+                                grid_lower(:,k)=grid(:,k);
+                                grid_upper(2,k)=grid(2,k)-upper_point*sind(obj.dihed);
+                                grid_upper(3,k)=grid(3,k)+upper_point*cosd(obj.dihed);
+                                grid_lower(2,k)=grid(2,k)-lower_point*sind(obj.dihed);
+                                grid_lower(3,k)=grid(3,k)+lower_point*cosd(obj.dihed);
+                            end
+                            grid(2,k)=grid(2,k)-skeleton_point*sind(obj.dihed);
+                            grid(3,k)=grid(3,k)+skeleton_point*cosd(obj.dihed);
+                            
+                            % increases grid point counter by 1
+                            k=k+1;
+                        end
+                    end
+                end
+                
                 te_idx(k-n_chordwise_points:k-1)=k-1;
+                
+
                 
                 % if wake grid is desired save wake front line
                 if wake==1
@@ -1949,7 +2950,13 @@ classdef class_wingsegment
             x=[];
             
             % compute panel indices
-            chordwise_pan=[obj.n_le_panels obj.n_chord  obj.n_te_panels];
+            
+            % chordwise_pan will change depending on whether ctr2 exists or not
+            if ctr_2_exists
+                chordwise_pan=[obj.n_le_panels n_chord_panels_ctr_1 obj.n_sp_panels n_chord_panels_ctr_2 obj.n_te_panels];
+            else
+                chordwise_pan=[obj.n_le_panels n_chord_panels_ctr_1 obj.n_sp_panels obj.n_te_panels];
+            end
             end_points=cumsum(chordwise_pan+1);
             offset=0;
             for ii=1:obj.n_span
@@ -1962,7 +2969,6 @@ classdef class_wingsegment
                 end
                 offset=offset+sum(chordwise_pan+1);
             end
-            
             panels=zeros(4,obj.n_span*n_chordwise_panels);
            
             % for potential flow solution
@@ -1974,6 +2980,7 @@ classdef class_wingsegment
                     obj.is_te(i)=1;
                 end
             end
+            
             
             % if wake grid is desired
             if (wake==1)||(wake==2)
@@ -1995,7 +3002,6 @@ classdef class_wingsegment
             obj.panels=panels;
             obj.te_idx=te_idx;
         end
-        
         
         function skeleton_point=compute_skeleton_point(obj,relative_chord_pos,relative_span_pos)
             nprof_upper_t=obj.profile_t(1,1);
@@ -2040,9 +3046,8 @@ classdef class_wingsegment
             slope_pos=3/4*(relative_chord_pos-relative_chord_pos_prv)+relative_chord_pos_prv;
             slope_p_t=nakeinterp1(coords_slope_t,slope_t,slope_pos);
             skeletonPointT=slope_p_t*(relative_chord_pos-relative_chord_pos_prv);
-           skeleton_line_t=obj.c_t*0.5*(interp1(coords_lower_t,profile_lower_t,relative_chord_pos,'lin','extrap')+interp1(coords_upper_t,profile_upper_t,relative_chord_pos,'lin','extrap'));
+%            skeleton_line_t=obj.c_t*0.5*(interp1(coords_lower_t,profile_lower_t,relative_chord_pos,'lin','extrap')+interp1(coords_upper_t,profile_upper_t,relative_chord_pos,'lin','extrap'));
             
-             skeleton_line_t=obj.c_t*0.5*(nakeinterp1(coords_lower_t,profile_lower_t,relative_chord_pos)+nakeinterp1(coords_upper_t,profile_upper_t,relative_chord_pos));
             nprof_upper_r=obj.profile_r(1,1);
             nprof_lower_r=obj.profile_r(1,2);
             coords_upper_r=obj.profile_r(2:1+nprof_upper_r,1);
@@ -2064,8 +3069,7 @@ classdef class_wingsegment
                 coords_slope_r=(coords_camberline_r(1:end-1)+coords_camberline_r(2:end))/2;
             slope_p_r=nakeinterp1(coords_slope_r,slope_r,slope_pos);
             skeletonPointR=slope_p_r*(relative_chord_pos-relative_chord_pos_prv);
-            skeleton_line_r=obj.c_r*0.5*(interp1(coords_lower_r,profile_lower_r,relative_chord_pos,'lin','extrap')+interp1(coords_upper_r,profile_upper_r,relative_chord_pos,'lin','extrap'));
-             skeleton_line_r=obj.c_r*0.5*(nakeinterp1(coords_lower_r,profile_lower_r,relative_chord_pos)+nakeinterp1(coords_upper_r,profile_upper_r,relative_chord_pos));
+%             skeleton_line_r=obj.c_r*0.5*(interp1(coords_lower_r,profile_lower_r,relative_chord_pos,'lin','extrap')+interp1(coords_upper_r,profile_upper_r,relative_chord_pos,'lin','extrap'));
 %             skeletonPoint=skeleton_line_r*(1-relative_span_pos)+skeleton_line_t*relative_span_pos;
              skeletonPoint=(obj.c_r*skeletonPointR*(1-relative_span_pos)+obj.c_t*skeletonPointT*relative_span_pos)+skeletonPointPrv;
         end
@@ -2354,14 +3358,123 @@ classdef class_wingsegment
                 fprintf('Unknown Data Format: %s \n', xmlstruct.tag);
             end
         end
-
+        
+        % Finds and assigns repsective panel Ids to their corresponding
+        % control surface (within wing-segment obj).
         function obj=  computeControlSurfacePanelIds(obj)
-            if obj.has_te_cs
-                obj.te_device.panelIds=zeros(1,obj.n_span*obj.n_te_panels);
-                for iSpan=1:obj.n_span
-                    obj.te_device.panelIds((iSpan-1)*obj.n_te_panels+1:(iSpan)*obj.n_te_panels)= ( obj.panel_start_idx+iSpan*obj.n_chord+(iSpan-1)*obj.n_te_panels:obj.panel_start_idx-1+iSpan*obj.n_chord+(iSpan)*obj.n_te_panels);
+            
+            % Total number of chordwise panels, from LE to TE (including
+            % all surfaces and regions)
+            n_panels = sum([obj.n_le_panels, obj.n_ctr1_panels, obj.n_sp_panels, obj.n_ctr2_panels, obj.n_te_panels]);
+            
+            % sum is used to turn empty elements ([]) into zeros.
+            n_le_panels = sum(obj.n_le_panels);
+            n_ctr1_panels = sum(obj.n_ctr1_panels);
+            n_sp_panels = sum(obj.n_sp_panels);
+            n_ctr2_panels = sum(obj.n_ctr2_panels);
+            n_te_panels = sum(obj.n_te_panels);
+            
+            
+            % Looks at panels belonging to TE
+            if obj.has_te_cs      
+                
+                % In case of NO overlap with spoilers
+                if isempty(obj.n_te_panels_overlap)
+                    obj.te_device.panelIds=zeros(1,obj.n_span*obj.n_te_panels);
+                    for iSpan=1:obj.n_span
+                        obj.te_device.panelIds((iSpan-1)*obj.n_te_panels+1:(iSpan)*obj.n_te_panels)= (obj.panel_start_idx+iSpan*(n_panels-obj.n_te_panels)+(iSpan-1)*obj.n_te_panels:obj.panel_start_idx-1+iSpan*(n_panels-obj.n_te_panels)+(iSpan)*obj.n_te_panels);
+                    end
+                    
+                % In case of overlap with spoilers
+                else
+                    % Panels belonging to free flap region are stored in panelIds
+                    obj.te_device.panelIds=zeros(1,obj.n_span*obj.n_te_panels_free);
+                    
+                    % Panels belonging to overlapped flap region are stored in panelIds_special
+                    obj.te_device.panelIds_special=zeros(1,obj.n_span*obj.n_te_panels_overlap);
+                    
+                    for iSpan=1:obj.n_span
+                        obj.te_device.panelIds_special((iSpan-1)*obj.n_te_panels_overlap+1:(iSpan)*obj.n_te_panels_overlap)= ...
+                            (obj.panel_start_idx + n_le_panels + n_ctr1_panels + n_sp_panels+(iSpan-1)*n_panels:obj.panel_start_idx-1 + n_le_panels + n_ctr1_panels + n_sp_panels + obj.n_te_panels_overlap + (iSpan-1)*n_panels);
+                        obj.te_device.panelIds((iSpan-1)*obj.n_te_panels_free+1:(iSpan)*obj.n_te_panels_free)= ...
+                            (obj.panel_start_idx + n_le_panels + n_ctr1_panels + n_sp_panels + obj.n_te_panels_overlap + (iSpan-1)*n_panels:obj.panel_start_idx-1 + n_le_panels + n_ctr1_panels + n_sp_panels + obj.n_te_panels_overlap + obj.n_te_panels_free + (iSpan-1)*n_panels);
+                    end
                 end
             end
+            
+            % Looks at panels belonging to LE
+            if obj.has_le_cs
+                obj.le_device.panelIds=zeros(1,obj.n_span*n_le_panels);
+                for iSpan=1:obj.n_span
+                    obj.le_device.panelIds((iSpan-1)*n_le_panels+1:(iSpan)*n_le_panels)= (obj.panel_start_idx+(iSpan-1)*n_panels:obj.panel_start_idx -1 + n_le_panels +(iSpan-1)*n_panels);
+                end
+            end
+            
+            % Looks at panels belonging to spoilers
+            if obj.has_sp_cs
+                obj.sp_device.panelIds=zeros(1,obj.n_span*n_sp_panels);
+                for iSpan=1:obj.n_span
+                    obj.sp_device.panelIds((iSpan-1)*n_sp_panels+1:(iSpan)*n_sp_panels)= (obj.panel_start_idx + n_le_panels + n_ctr1_panels+(iSpan-1)*n_panels:obj.panel_start_idx-1 + n_le_panels + n_ctr1_panels + n_sp_panels + (iSpan-1)*n_panels);
+                end
+            end
+            
+            % Code below makes sure that panelIds are arranged according to
+            % our convention. Convention specified that:
+                 % - PanelIds array shall contain all panels belonging to
+                 %   that surface. This means that in case of spoiler/flap
+                 %   overlap, the panel Ids arrays of both spoilers and
+                 %   flaps will contain panels in both the free region and
+                 %   overlap region
+                 %
+                 % - PanelIds_special array shall contain all panels
+                 %   belonging to special areas (such as overlap). Both CS
+                 %   involved will have a PanelIds_special array, which
+                 %   will of course contain the same IDs.
+                 %
+                 % - PanelIds_standard array shall contain all panels
+                 %   belonging to standard areas (only used when
+                 %   PanelIds_special is not empty). The union of
+                 %   PanelIds_special and PanelIds_standard shall yield
+                 %   PanelIds.
+                 
+           if obj.has_te_cs
+               % creating panelIds_standard array
+               obj.te_device.panelIds_standard = obj.te_device.panelIds;
+               if ~isempty(obj.te_device.panelIds_special)
+                  
+                  % adding special IDs to panelIDs
+                  obj.te_device.panelIds = [obj.te_device.panelIds, obj.te_device.panelIds_special];
+                  
+                  % rearranging panelIds arrays so that they are in
+                  % ascending order
+                  obj.te_device.panelIds = sort(obj.te_device.panelIds,'ascend');
+              end
+           end
+           
+           if obj.has_sp_cs
+              % creating panelIds_standard array
+              obj.sp_device.panelIds_standard = obj.sp_device.panelIds;
+                  
+               %the check here is performed within the TE, since at this
+               %point of the code special panels are only assigned to the
+               %flap (in case of overlap)
+               if obj.has_te_cs
+                  if ~isempty(obj.te_device.panelIds_special)
+
+                      % creating panelIds_special array (IDs from flap are
+                      % used. Overlap panels will be the same)
+                      obj.sp_device.panelIds_special = obj.te_device.panelIds_special;
+
+                      % adding special IDs to panelIDs
+                      obj.sp_device.panelIds = [obj.sp_device.panelIds, obj.sp_device.panelIds_special];
+
+                      % rearranging panelIds arrays so that they are in
+                      % ascending order
+                      obj.sp_device.panelIds = sort(obj.sp_device.panelIds,'ascend');
+                  end
+               end
+           end
+           
         end
     end
 end

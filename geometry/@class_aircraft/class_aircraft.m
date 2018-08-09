@@ -84,6 +84,16 @@ classdef class_aircraft
         clamping_conditions;        
         %{nGustZones x 1} cell array with panelIds belonging to GustZones
         gustZones;
+        
+        % array containing handles to parent control surfaces (originals
+        % are stored in their respective class_aerosurface object)
+        control_surfaces_parents;
+        
+        %maximum operating altitude
+        Zmo=13500;
+        
+        % struct containing the points for cheb type distributions 
+        dataForCheb
     end
     
     methods (Static)
@@ -217,7 +227,19 @@ classdef class_aircraft
                     end
                 end
             end
-                      
+            
+            % moving all parent control surfaces from wing objects to
+            % aircraft object
+            
+            for counter = 1:length(obj.wings)
+                
+                for counter_cs = 1:length(obj.wings(counter).control_surfaces)
+                    obj.wings(counter).control_surfaces(counter_cs).wing_index = counter;
+                end
+                
+                obj.control_surfaces_parents(counter) = obj.wings(counter).control_surfaces;
+            end
+            
             obj.grid_settings=class_grid_settings;    
             mkdir('results', obj.name);
         end
@@ -425,6 +447,7 @@ classdef class_aircraft
             % read desired grid size from grid_settings structure
             x_max=obj.grid_settings.x_max_grid_size;
             y_max=obj.grid_settings.y_max_grid_size;
+            n_x_min=obj.grid_settings.n_x_min;
             wake=obj.grid_settings.wake;
 
             % initialize variables for 2D grid
@@ -447,7 +470,7 @@ classdef class_aircraft
             % assemble grid from all wings
             for i=1:length(obj.wings)
                 % first compute all sub grids
-                obj.wings(i)=obj.wings(i).compute_grid(x_max,y_max,wake);
+                obj.wings(i)=obj.wings(i).compute_grid(x_max,y_max,n_x_min,wake);
                 
                 % all operations for 2D grid
                 grid_len_b4=length(grid);
@@ -488,12 +511,10 @@ classdef class_aircraft
                 obj=compute_fuselage_grid(obj);
             end
             obj.gustZones={1:size(obj.panels,2)};
+            
+            obj = obj.computeControlSurfacePanelIds();
         end    
         
-                
-        function obj=f_update_grid(obj)
-            
-        end
 
         function obj=compute_fuselage_grid(obj)
             
@@ -634,17 +655,161 @@ classdef class_aircraft
                 end
             end
         end
+        
+        function obj=write_modal_time_history_in_paraview(obj,aircraft_structure,history,folder,name)
+            mkdir(folder);
+            for iFrame=1:size(history,1)
+                    aircraft_structure.nodal_deflections=aircraft_structure.modeshapes(:,1:size(history,2))*history(iFrame,:)';
+                    aircraft_structure=aircraft_structure.f_postprocess();
+                    aircraft=obj.compute_deflected_grid(aircraft_structure.f_get_deflections);
+                    aircraft.write_grid_deflected([folder, '\' name '_frame_', int2str(iFrame)],[0 0 0]',[0 0 0]',0);
+            end
+        end
                 
         function obj=plot_grid(obj)
+            
             hold on
-            for i=1:length(obj.panels)
-                handle= fill3(obj.grid(1,obj.panels(:,i)), obj.grid(2,obj.panels(:,i)),obj.grid(3,obj.panels(:,i)),'b');
+            
+          
+            allCSPanels=[];
+            
+            for wing_count = 1:length(obj.wings)
+            
+                % loops through all wing-segments in order to highlight panels
+                % belonging to control surfaces.
+                for seg_count = 1:length(obj.wings(wing_count).wing_segments)
+
+                    % Plots panels belonging to leading edge control surfaces in GREEN
+                    if ~isempty(obj.wings(wing_count).wing_segments(seg_count).n_le_panels) && obj.wings(wing_count).wing_segments(seg_count).n_le_panels > 0
+
+                        panels_loc = obj.wings(wing_count).wing_segments(seg_count).le_device.panelIds;
+                        panels_locL = obj.wings(wing_count).wing_segments(seg_count).le_device.panelIdsL;
+
+                        for i=1:length(panels_loc)
+                            handle= fill3(obj.grid(1,obj.panels(:,panels_loc(i))), obj.grid(2,obj.panels(:,panels_loc(i))),obj.grid(3,obj.panels(:,panels_loc(i))),'g');
+                            alpha(handle,1);
+                        end
+                        
+                        if obj.wings(wing_count).wing_segments(seg_count).symmetric
+                           for i=1:length(panels_locL)
+                               handle= fill3(obj.grid(1,obj.panels(:,panels_locL(i))), obj.grid(2,obj.panels(:,panels_locL(i))),obj.grid(3,obj.panels(:,panels_locL(i))),'g');
+                               alpha(handle,1);
+                           end
+                        end
+                        allCSPanels=[allCSPanels panels_loc panels_locL];
+                    end
+
+                    % Plots panels belonging to spoiler control surfaces in YELLOW
+                    if ~isempty(obj.wings(wing_count).wing_segments(seg_count).n_sp_panels) && obj.wings(wing_count).wing_segments(seg_count).n_sp_panels > 0
+
+                        panels_loc = obj.wings(wing_count).wing_segments(seg_count).sp_device.panelIds_standard;
+                        panels_locL = obj.wings(wing_count).wing_segments(seg_count).sp_device.panelIds_standard_L;
+
+                        for i=1:length(panels_loc)
+                            handle= fill3(obj.grid(1,obj.panels(:,panels_loc(i))), obj.grid(2,obj.panels(:,panels_loc(i))),obj.grid(3,obj.panels(:,panels_loc(i))),'y');
+                            alpha(handle,1);
+                        end
+                        
+                        if obj.wings(wing_count).wing_segments(seg_count).symmetric
+                            for i=1:length(panels_locL)
+                                handle= fill3(obj.grid(1,obj.panels(:,panels_locL(i))), obj.grid(2,obj.panels(:,panels_locL(i))),obj.grid(3,obj.panels(:,panels_locL(i))),'y');
+                                alpha(handle,1);
+                            end
+                        end
+                        allCSPanels=[allCSPanels panels_loc panels_locL];
+                    end
+
+                    % Plots panels belonging to trailing edge surfaces in CYAN
+                    if ~isempty(obj.wings(wing_count).wing_segments(seg_count).n_te_panels) && obj.wings(wing_count).wing_segments(seg_count).n_te_panels > 0
+
+                        panels_loc = obj.wings(wing_count).wing_segments(seg_count).te_device.panelIds_standard;
+                        panels_locL = obj.wings(wing_count).wing_segments(seg_count).te_device.panelIds_standard_L;
+
+                        for i=1:length(panels_loc)
+                            handle= fill3(obj.grid(1,obj.panels(:,panels_loc(i))), obj.grid(2,obj.panels(:,panels_loc(i))),obj.grid(3,obj.panels(:,panels_loc(i))),'c');
+                            alpha(handle,1);
+                        end
+                        
+                        if obj.wings(wing_count).wing_segments(seg_count).symmetric
+                            for i=1:length(panels_locL)
+                                handle= fill3(obj.grid(1,obj.panels(:,panels_locL(i))), obj.grid(2,obj.panels(:,panels_locL(i))),obj.grid(3,obj.panels(:,panels_locL(i))),'c');
+                                alpha(handle,1);
+                            end
+                        end
+                        allCSPanels=[allCSPanels panels_loc panels_locL];
+                        % If there is an overlap between spoilers and flap, the
+                        % overlapping region is plotted in RED, and the free
+                        % region in CYAN
+                        if ~isempty(obj.wings(wing_count).wing_segments(seg_count).te_device.panelIds_special)
+
+                            panels_loc_special = obj.wings(wing_count).wing_segments(seg_count).te_device.panelIds_special;
+                            panels_loc_special_L = obj.wings(wing_count).wing_segments(seg_count).te_device.panelIds_special_L;
+
+                            for i=1:length(panels_loc_special)
+                                handle= fill3(obj.grid(1,obj.panels(:,panels_loc_special(i))), obj.grid(2,obj.panels(:,panels_loc_special(i))),obj.grid(3,obj.panels(:,panels_loc_special(i))),'r');
+                                alpha(handle,1);
+                            end
+                            
+                            if obj.wings(wing_count).wing_segments(seg_count).symmetric
+                                for i=1:length(panels_loc_special_L)
+                                    handle= fill3(obj.grid(1,obj.panels(:,panels_loc_special_L(i))), obj.grid(2,obj.panels(:,panels_loc_special_L(i))),obj.grid(3,obj.panels(:,panels_loc_special_L(i))),'r');
+                                    alpha(handle,1);
+                                end
+                            end                            
+                        end 
+                    end
+                end
+            end
+            % plot parametric cs
+            for wing_count = 1:length(obj.wings)
+                if ~isempty(obj.wings(wing_count).parCS)
+                    for iCs=1:length(obj.wings(wing_count).parCS)
+                        panels_loc_special = obj.wings(wing_count).parCS{iCs}.panelIds;
+                        for i=1:length(panels_loc_special)
+                            handle= fill3(obj.grid(1,obj.panels(:,panels_loc_special(i))), obj.grid(2,obj.panels(:,panels_loc_special(i))),obj.grid(3,obj.panels(:,panels_loc_special(i))),'m');
+                            alpha(handle,obj.wings(wing_count).parCS{iCs}.fraction(i));
+                        end
+
+                        if obj.wings(wing_count).wing_segments(seg_count).symmetric
+                            panels_loc_special_L = obj.wings(wing_count).parCS{iCs}.panelIdsL;
+
+                            for i=1:length(panels_loc_special_L)
+                                handle= fill3(obj.grid(1,obj.panels(:,panels_loc_special_L(i))), obj.grid(2,obj.panels(:,panels_loc_special_L(i))),obj.grid(3,obj.panels(:,panels_loc_special_L(i))),'m');
+                                alpha(handle,obj.wings(wing_count).parCS{iCs}.fraction(i));
+                            end
+                        end
+                        allCSPanels=[allCSPanels panels_loc_special panels_loc_special_L];
+                    end
+                end
+                
+            end
+             % plots all the grid panels in LIGHT BLUE
+             restPanels=setdiff(1:length(obj.panels),allCSPanels);
+            for i=1:length(restPanels)
+                handle= fill3(obj.grid(1,obj.panels(:,restPanels(i))), obj.grid(2,obj.panels(:,restPanels(i))),obj.grid(3,obj.panels(:,restPanels(i))),'b');
                 alpha(handle,0.4);
             end
             axis equal
             axis tight
             grid on
+            
         end
+        
+        function obj=plot_gustZones(obj)
+            hold on
+            for iZone=1:size(obj.gustZones,1)
+                r=rand(1,3);
+                for i=obj.gustZones{iZone}
+                    handle= fill3(obj.grid(1,obj.panels(:,i)), obj.grid(2,obj.panels(:,i)),obj.grid(3,obj.panels(:,i)),'b');
+                    alpha(handle,0.4);
+                    handle.FaceColor=r;
+                end
+            end
+            axis equal
+            axis tight
+            grid on
+        end
+        
         
         function obj=write_tecplot_volgrid(obj,filename)
             mode='W';
@@ -801,43 +966,58 @@ classdef class_aircraft
         end
 
         function obj=f_set_control_surface(obj,name,deflection) 
-            for i=1:length(obj.wings)
-                for j=1:length(obj.wings(i).wing_segments)
-                    if  ~isempty(obj.wings(i).wing_segments(j).te_device)
-                        if strcmp(obj.wings(i).wing_segments(j).te_device.name,name)
-                            obj.wings(i).wing_segments(j)=obj.wings(i).wing_segments(j).f_deflect_control_surface(name,deflection);
+            
+            % cs_idx indicates whether a surface was deflected. If yes, its value
+            % will be the index of deflected surface within control_surfaces_parents
+            cs_idx = 0;
+            
+            for i=1:length(obj.control_surfaces_parents)
+                if strcmp(obj.control_surfaces_parents(i).name,name)
+                    obj.control_surfaces_parents(i).delta = deflection;
+                    if obj.control_surfaces_parents(i).is_sym
+                        if obj.control_surfaces_parents(i).is_sym_defl
+                            obj.control_surfaces_parents(i).delta_l_r=[deflection -deflection];
+                        else
+                            obj.control_surfaces_parents(i).delta_l_r=[deflection deflection];
                         end
-                        
-                        if strcmp([obj.wings(i).wing_segments(j).te_device.name '_left'],name)
-                            obj.wings(i).wing_segments(j).te_device.delta(1)=deflection;
-                            obj.wings(i).wing_segments(j)=obj.wings(i).wing_segments(j).f_deflect_control_surface(obj.wings(i).wing_segments(j).te_device.name,-deflection,'right');
-                        end
-                        
-                        if strcmp([obj.wings(i).wing_segments(j).te_device.name '_right'],name)
-                            obj.wings(i).wing_segments(j).te_device.delta(2)=deflection;
-                            obj.wings(i).wing_segments(j)=obj.wings(i).wing_segments(j).f_deflect_control_surface(obj.wings(i).wing_segments(j).te_device.name,-deflection,'left');
-                        end
+                    else
+                        obj.control_surfaces_parents(i).delta_l_r=[deflection];
                     end
-                        
-                    if ~isempty(obj.wings(i).wing_segments(j).le_device)
-                        if strcmp(obj.wings(i).wing_segments(j).le_device.name,name)
-                            obj.wings(i).wing_segments(j)=obj.wings(i).wing_segments(j).f_deflect_control_surface(name,deflection);
-                        end
-                        
-                        if strcmp([obj.wings(i).wing_segments(j).le_device.name '_left'],name)
-                            
-                            obj.wings(i).wing_segments(j).le_device.delta(1)=deflection;
-                            obj.wings(i).wing_segments(j)=obj.wings(i).wing_segments(j).f_deflect_control_surface(obj.wings(i).wing_segments(j).le_device.name,deflection);
-                        end
-                        
-                        if strcmp([obj.wings(i).wing_segments(j).le_device.name 'right'],name)
-                            obj.wings(i).wing_segments(j).le_device.delta(2)=deflection;
-                            obj.wings(i).wing_segments(j)=obj.wings(i).wing_segments(j).f_deflect_control_surface(obj.wings(i).wing_segments(j).le_device.name,deflection);
-                        end
-                        
-                    end
+                    cs_idx = i;
+                end
+                
+                if strcmp([obj.control_surfaces_parents(i).name '_left'],name)
+                    obj.control_surfaces_parents(i).delta_l_r(2)= deflection;
+                    cs_idx = i;
+                end
+                
+                if strcmp([ obj.control_surfaces_parents(i).name '_right'],name)
+                    obj.control_surfaces_parents(i).delta_l_r(1)= deflection;
+                    cs_idx = i;
+                end
+                
+                % _asymm is a new deflection type that can be used for any
+                % surface. It deflects surfaces asymmetrically, meaning
+                % that left and right displacement are totally independent.
+                % As such, the deflection input has to be an array [left deflection, right deflection]
+                if strcmp([obj.control_surfaces_parents(i).name '_asymm'],name)
+                    obj.control_surfaces_parents(i).delta = deflection;
+                    obj.control_surfaces_parents(i).delta_l_r(1) = deflection;
+                    obj.control_surfaces_parents(i).delta_l_r(2) = deflection;
+                    cs_idx = i;
                 end
             end
+            
+            if cs_idx>0
+                wing_index = obj.control_surfaces_parents(cs_idx).wing_index;
+                start_seg_idx = obj.control_surfaces_parents(cs_idx).children{1}.seg_idx;
+                end_seg_idx = obj.control_surfaces_parents(cs_idx).children{end}.seg_idx;
+                
+                for seg_count = start_seg_idx:end_seg_idx
+                    obj.wings(wing_index).wing_segments(seg_count) = obj.wings(wing_index).wing_segments(seg_count).compute_controlsurface_coordinates();        
+                end
+            end
+            
             for i=1:length(obj.control_surfaces)
                 if(strcmp(obj.control_surfaces{i},name))
                    obj.control_deflections{i}=deflection; 
@@ -998,7 +1178,7 @@ classdef class_aircraft
             pass=1;
             for iWing=1:length(obj.wings)
                 for iSeg=2:length(obj.wings(iWing).wing_segments)
-                    if ~isequal(obj.wings(iWing).wing_segments(iSeg-1).Theta_t,obj.wings(iWing).wing_segments(iSeg).Theta_r)
+                    if ~(abs(obj.wings(iWing).wing_segments(iSeg-1).Theta_t-obj.wings(iWing).wing_segments(iSeg).Theta_r) < 1e-8)
                         fprintf('Warning: nonsmooth twist transition between segment %i and segment %i on wing %i \n',iSeg-1,iSeg, iWing)
                         pass=0;
                     end
@@ -1014,6 +1194,76 @@ classdef class_aircraft
                     end
                 end
             end
+        end
+        function obj = computeChebPoints(obj)
+            nPanSeg={};
+                for iWing=1:length(obj.wings)
+                    temp=[];
+                    for iSeg=1:length(obj.wings(iWing).wing_segments)
+                        temp=[temp size(obj.wings(iWing).wing_segments(iSeg).panels,2)];
+                    end
+                    nPanSeg{iWing}=temp;
+                end
+            for iWing=1:length(obj.wings)
+                iSeg=1;
+                normPrvMidlines=0;
+                spanWisePoints{iWing}=[];
+                chordWisePoints{iWing}=[];
+
+                for iSeg=1:length(obj.wings(iWing).wing_segments)
+                    nPrvPanels=0;
+                    for jWing=1:iWing-1
+                        nPrvPanels=nPrvPanels+sum(nPanSeg{jWing});
+                        if obj.wings(jWing).symmetric
+                            nPrvPanels=nPrvPanels+sum(nPanSeg{jWing});
+                        end
+                    end
+                    for jSeg=1:iSeg-1
+                        nPrvPanels=nPrvPanels+(nPanSeg{iWing}(jSeg));
+                    end
+
+                    nPanels=nPanSeg{iWing}(iSeg);
+                    nSpan=sum(obj.is_te(nPrvPanels+1:nPrvPanels+nPanels));
+                    nChord=nPanels/nSpan;
+                    innerLEPanel=1+nPrvPanels;
+                    outerLEPanel=(nSpan-1)*nChord+1+nPrvPanels;
+                    innerTEPanel=nChord+nPrvPanels;
+                    outerTEPanel=nPanels+nPrvPanels;
+
+                    midLine=(obj.grid(:,obj.panels(2,outerLEPanel))+obj.grid(:,obj.panels(3,outerTEPanel)))./2-(obj.grid(:,obj.panels(1,innerLEPanel))+obj.grid(:,obj.panels(4,innerTEPanel)))./2;
+                    linPoints=normPrvMidlines+linspace(0,1,nSpan*2+1)*norm(midLine);
+                    spanWisePoints{iWing}=[spanWisePoints{iWing} reshape(repmat(linPoints(2:2:end-1),nChord,1),1,nPanels)];
+                    normPrvMidlines=normPrvMidlines+norm(midLine);
+                    for iChord=1:nSpan
+                        %midpoints of panels in this strip
+                        panelIdx=((iChord-1)*nChord+nPrvPanels+1:(iChord)*nChord+nPrvPanels);
+                        midpoints=(obj.grid(:,obj.panels(1,panelIdx))+obj.grid(:,obj.panels(2,panelIdx))+obj.grid(:,obj.panels(3,panelIdx))+obj.grid(:,obj.panels(4,panelIdx)))./4;
+                        dist=midpoints(:,2:end)-midpoints(:,1);
+                        chordWisePoints{iWing}=[chordWisePoints{iWing} [0 sqrt(sum(dist.^2))./max(sqrt(sum(dist.^2)))]];
+                    end
+
+                %     hold on; scatter3(obj.grid(1,obj.panels(:,innerLEPanel)),obj.grid(2,obj.panels(:,innerLEPanel)),obj.grid(3,obj.panels(:,innerLEPanel)),'o')
+                %     hold on; scatter3(obj.grid(1,obj.panels(:,outerLEPanel)),obj.grid(2,obj.panels(:,outerLEPanel)),obj.grid(3,obj.panels(:,outerLEPanel)),'+')
+                %     hold on; scatter3(obj.grid(1,obj.panels(:,innerTEPanel)),obj.grid(2,obj.panels(:,innerTEPanel)),obj.grid(3,obj.panels(:,innerTEPanel)),'d')
+                %     hold on; scatter3(obj.grid(1,obj.panels(:,outerTEPanel)),obj.grid(2,obj.panels(:,outerTEPanel)),obj.grid(3,obj.panels(:,outerTEPanel)),'s')
+
+                end
+                if obj.wings(iWing).symmetric
+                    spanWisePoints{iWing}=([normPrvMidlines+spanWisePoints{iWing} normPrvMidlines-spanWisePoints{iWing}])/(2*normPrvMidlines)*2-1;
+                    spanWiseLength{iWing}=2*normPrvMidlines;
+                    chordWisePoints{iWing}=[chordWisePoints{iWing} chordWisePoints{iWing}]*2-1;
+                else
+                    spanWisePoints{iWing}=spanWisePoints{iWing}/normPrvMidlines*2-1;
+                    spanWiseLength{iWing}=normPrvMidlines;
+                    chordWisePoints{iWing}=chordWisePoints{iWing}*2-1;
+                    
+                end
+            end
+
+            obj.dataForCheb.spanWisePoints=spanWisePoints;
+            obj.dataForCheb.spanWiseLength=spanWiseLength;
+            obj.dataForCheb.chordWisePoints=chordWisePoints;
+            
         end
     end
 end

@@ -19,8 +19,8 @@ classdef class_aero_state
     
     properties
         % aerodynamic state variables
-        alpha = 0;                  % Angle of attack                                double      (1x1)   [rad]  *
-        beta = 0;                   % Angle of sideslip                              double      (1x1)   [rad]  *
+        alpha = 0;                  % Angle of attack                                double      (1x1)   [deg]  *
+        beta = 0;                   % Angle of sideslip                              double      (1x1)   [deg]  *
         V_inf=0;                    % Freestream Vector                             double      (3x1)   [m/s]  * 
         V_A=10;                   	% Aerodynamic velocity                           double      (1x1)   [m/s]  * 
         mu=1.81E-5;                 % viscosity kg/(m*s)

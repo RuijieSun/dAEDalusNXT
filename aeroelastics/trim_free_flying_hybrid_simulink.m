@@ -5,15 +5,18 @@
 % 
 % This file is part of dAEDalusNXT (https://github.com/seyk86/dAEDalusNXT)
 %
-function [trimstate,trimreport,mean_axis_origin]=trim_free_flying_hybrid_simulink(aircraft,aircraft_structure,Aircraft,AeroelasticSSM,trim_state,GAF_Vb)
+function [trimstate,trimreport,mean_axis_origin]=trim_free_flying_hybrid_simulink(aircraft,aircraft_structure,Aircraft,AeroelasticSSM,trim_state,GAF_Vb,varargin)
 
+% Varargin inputs are used to define the CG excursion(in meters) and the Aircraft mass values directly, instead of computing from the aircraft_structure object. This is used during Handling qualities assessment.
 %% generate required paths for program execution
 aircraft.weights.W= sum(aircraft_structure.Mff(1:6:end));
 
 mean_axis_origin=-aircraft_structure.f_compute_CG;
 [s_inertial,delta_inertial,I_Hat,b,b_Hat_Skew,omega_Hat_Skew,A_Bar]=compute_eqm_matrices_mean([0 0 0]',[0 0 0]',aircraft_structure.node_coords,aircraft_structure.nodal_deflections*0,-mean_axis_origin,[0 0 0]');
 [M_tot_mean,K_tot_mean,F_tot_mean]=compute_mean_axis_modal_matrices(A_Bar,I_Hat,b,b_Hat_Skew,omega_Hat_Skew,aircraft_structure.Mff,aircraft_structure.Kff,aircraft_structure.modeshapes,AeroelasticSSM.nE+6,zeros(AeroelasticSSM.nE+6,1));
- 
+ if length(varargin)>0
+    mean_axis_origin=mean_axis_origin+[varargin{1};0;0]; %The CG excursion value given in meters is defined here
+ end
 Trim_State=Flight_State_SIM;
 Trim_State.AircraftState.CG=mean_axis_origin';
 
@@ -27,6 +30,9 @@ height=trim_state.h;
 
 Trim_State.Xe=[0 0 -height];
 Trim_State.AircraftState.m=M_tot_mean(1,1);
+ if length(varargin)>1
+    Trim_State.AircraftState.m=varargin{2}; %The Aircraft weight given in kg
+ end
 Trim_State.AircraftState.Ixyz=Aircraft.Inertia;
 Trim_State.VCAS=trim_state.aerodynamic_state.V_A;
 Trim_State.Alpha=trim_state.aerodynamic_state.alpha;

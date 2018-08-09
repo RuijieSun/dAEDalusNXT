@@ -11,14 +11,16 @@ classdef class_UVLM_SSM_settings
     
     properties
         %if 1, outputs are splitted in steady/unsteady
-        splitForce =1
+        splitForce =0
         %if 1, sectional pressures are output
-        sectPress=1
+        sectPress=0
         %reduction method 'bpod', 'balred'
         redMethod='bpod'
         %reduction order (lpvkernel); if set to zero, no reduction is
         %carried out
         redOrder=0
+		% possibility to reduce force to 'steady' or 'unsteady' part. If unset, both parts (default)
+        force
     end
     
     methods

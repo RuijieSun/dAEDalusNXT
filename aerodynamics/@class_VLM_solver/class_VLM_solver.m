@@ -18,6 +18,9 @@ classdef class_VLM_solver
         panels;
         %> trailing edge indices
         te_idx;
+        %> info concerning control surfaces (name, delta, delta_l_r, all
+        %types of panel IDs)
+        control_surfaces;
         %> collocation point coordinates
         colloc;
         %> normal vector on collocation point
@@ -50,6 +53,21 @@ classdef class_VLM_solver
         dvortex;
         
         Ma_corr;
+        
+        % rotation vector of hingeline of each control surface. Array of
+        % vectors
+        rotation_vect;
+        % same as above, but for symmetric part of wing (zeros if
+        % is_sym==0)
+        rotation_vect_sym;
+        
+        % matrix necessary to derive a rotation matrix from the rotation
+        % vector
+        K_mat;
+        
+        % same as above, but for symmetric part of wing (zeros if
+        % is_sym==0)
+        K_mat_sym;
         
         %%%% RESULTS
         %% aerodynamic coefficients
@@ -132,18 +150,21 @@ classdef class_VLM_solver
         flag;
         
         crossp;
-        
+
         
     end
     
     methods
-        function obj=class_VLM_solver(grid,te_idx,panels,state,reference)
+        function obj=class_VLM_solver(grid,te_idx,panels,state,reference, control_surfaces)
             obj.state=state;
             obj.rho=state.rho_air;
             obj.Ma_corr=sqrt(1-state.Ma^2);
             obj.state.p_ref=reference.p_ref;
             obj.grid=grid;
             obj.panels=panels;
+            % the control_surface array contains handles to all parent
+            % control surfaces belonging to the aircraft.
+            obj.control_surfaces = control_surfaces;
 
             obj.te_idx=te_idx;
             obj.reference=reference;
@@ -152,6 +173,7 @@ classdef class_VLM_solver
                     obj.r(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.75+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.25-obj.state.p_ref';
                 obj.r_dwn(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.25+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.75-obj.state.p_ref';
             end
+            
             if obj.Ma_corr<1
                 obj.Uinf=a2bf(state.V_A,state.alpha,state.beta,obj.Ma_corr);
                 obj.grid(1,:)=grid(1,:)/obj.Ma_corr;
@@ -160,9 +182,14 @@ classdef class_VLM_solver
             else
                 obj.Uinf=a2bf(state.V_A,state.alpha,state.beta,1);
             end
+           
             obj.qinf=1/2*state.rho_air*norm(obj.Uinf)^2;
+            % computes rotation vectors necessary to deflect normal vectors
+            % of control surface panels
+            obj = compute_rotation_vectors_control_surfaces(obj);
             
             obj=obj.compute_colloc_points();
+            
         end
         
         function obj=f_set_state(obj,state)
@@ -181,12 +208,20 @@ classdef class_VLM_solver
             obj.state=state;
         end
         
-        function obj=set_grid(obj,grid,panels)
+        function obj=set_grid(obj,grid,panels) 
+            obj.grid=grid;
+            for i=1:length(obj.panels)
+                    obj.r(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.75+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.25-obj.state.p_ref';
+                obj.r_dwn(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.25+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.75-obj.state.p_ref';
+            end
             obj.grid(1,:)=grid(1,:)/obj.Ma_corr;
             obj.grid(2,:)=grid(2,:);
             obj.grid(3,:)=grid(3,:);
             obj.panels=panels;
+            
+           
             obj=obj.compute_colloc_points(); 
+            obj = compute_rotation_vectors_control_surfaces(obj);
         end
         
         function new = f_copy(this)
@@ -208,6 +243,170 @@ classdef class_VLM_solver
                 %deflected?
                 n_vec=cross(obj.grid(:,obj.panels(3,i))-obj.grid(:,obj.panels(1,i)),obj.grid(:,obj.panels(4,i))-obj.grid(:,obj.panels(2,i)));
                 obj.colloc_nvec(:,i)=n_vec/norm(n_vec);
+            end
+            % check for spoilers and deflect them
+            for iCs=1:length(obj.control_surfaces)
+                if obj.control_surfaces(iCs).pos==2
+                    if obj.control_surfaces(iCs).delta~=0
+                        obj=obj.deflect_nvec(obj.control_surfaces(iCs).name,obj.control_surfaces(iCs).delta,0);
+                    end
+                end
+            end
+        end
+        
+        % computes the rotation vector of all control surfaces. Executed
+        % when VLM is initialized. Only changes when control surface
+        % geometry changes.
+        function obj = compute_rotation_vectors_control_surfaces(obj)
+           
+            % initializes rotation_vector array. It belongs to the VLM
+            % class. Each column is a different vector, each vector belongs
+            % to a specific control surface
+            obj.rotation_vect = zeros(3,length(obj.control_surfaces));
+            
+            % loops through all parent CS passed to the VLM class
+            for i=1:length(obj.control_surfaces)
+                
+                % runs if TE surface
+                if obj.control_surfaces(i).pos == 0 
+                    te_panel_idx = obj.control_surfaces(i).panelIds(1); %takes index of last panel of TE surface (TE of flap, gives direction vector of hingeline)
+                    obj.rotation_vect(:,i) = obj.grid(:,obj.panels(2,te_panel_idx))-obj.grid(:,obj.panels(1,te_panel_idx)); %computes direction vector of hingeline
+                
+                % runs if LE surface
+                elseif obj.control_surfaces(i).pos == 1
+                    le_panel_idx = obj.control_surfaces(i).panelIds(end); %takes index of last panel of LE surface (TE of flap, gives direction vector of hingeline)
+                    obj.rotation_vect(:,i) = obj.grid(:,obj.panels(3,le_panel_idx))-obj.grid(:,obj.panels(4,le_panel_idx)); %computes direction vector of hingeline
+                
+                % runs if spoiler
+                elseif obj.control_surfaces(i).pos == 2
+                    sp_panel_idx = obj.control_surfaces(i).panelIds(1); %takes index of last panel of SP surface (TE of flap, gives direction vector of hingeline)
+                    obj.rotation_vect(:,i) = obj.grid(:,obj.panels(2,sp_panel_idx))-obj.grid(:,obj.panels(1,sp_panel_idx)); %computes direction vector of hingeline
+                    
+                end
+                
+                % rotation vector is the direction vector of the hingeline
+                % of the surface being analyzed.
+                
+                % normalizes rotation vector
+                obj.rotation_vect(:,i) = obj.rotation_vect(:,i)/norm(obj.rotation_vect(:,i));
+                % calculates K matrix, later used in deflect_nvec to
+                % compute the Rodriguez roatation matrix
+                obj.K_mat(:,:,i) = [  [0, -obj.rotation_vect(3,i), obj.rotation_vect(2,i)];...
+                                      [obj.rotation_vect(3,i), 0, -obj.rotation_vect(1,i)];...
+                                      [-obj.rotation_vect(2,i), obj.rotation_vect(1,i), 0]  ];
+                
+                % Code below does exactly the same as its equivalent above,
+                % only for the symmetric equivalent of the above surfaces
+                if obj.control_surfaces(i).is_sym == 1
+                    
+                    if obj.control_surfaces(i).pos == 0 
+                        le_panel_idx_sym = obj.control_surfaces(i).panelIdsL(1);
+                        obj.rotation_vect_sym(:,i) = obj.grid(:,obj.panels(2,le_panel_idx_sym))-obj.grid(:,obj.panels(1,le_panel_idx_sym));
+
+                    elseif obj.control_surfaces(i).pos == 1
+                        te_panel_idx_sym = obj.control_surfaces(i).panelIdsL(end);
+                        obj.rotation_vect_sym(:,i) = obj.grid(:,obj.panels(3,te_panel_idx_sym))-obj.grid(:,obj.panels(4,te_panel_idx_sym));
+
+                    elseif obj.control_surfaces(i).pos == 2
+                        sp_panel_idx_sym = obj.control_surfaces(i).panelIdsL(1);
+                        obj.rotation_vect_sym(:,i) = obj.grid(:,obj.panels(2,sp_panel_idx_sym))-obj.grid(:,obj.panels(1,sp_panel_idx_sym));
+
+                    end
+                    
+                    obj.rotation_vect_sym(:,i) = obj.rotation_vect_sym(:,i)/norm(obj.rotation_vect_sym(:,i));
+                    obj.K_mat_sym(:,:,i) = [  [0, -obj.rotation_vect_sym(3,i), obj.rotation_vect_sym(2,i)];...
+                                              [obj.rotation_vect_sym(3,i), 0, -obj.rotation_vect_sym(1,i)];...
+                                              [-obj.rotation_vect_sym(2,i), obj.rotation_vect_sym(1,i), 0]  ];
+                                          
+                % if the current CS is not symmetric, its rotation vector
+                % and K_mat symmetric entries will be zeros.
+                else
+                    obj.rotation_vect_sym(:,i) = zeros(1,3);
+                    obj.K_mat_sym(:,:,i) = zeros(3);
+                end
+            end
+        end
+        
+        % deflects the normal vectors of the panels of the control surface
+        % whose name is specified, by the specified deflection (positive
+        % clockwise)
+        function obj = deflect_nvec(obj, name, deflection, flag_extra_rotation)
+            
+            % flag extra rotation determines whether the normal vectors
+            % should be rotated by the value specified in the function
+            % input, or by the value specified by the delta associated with
+            % that particular surface.
+            
+            % converts deflection from degs to rads
+            theta_rad = deg2rad(deflection);
+            
+            % loops over all parent CS
+            for i=1:length(obj.control_surfaces)
+                
+                % checks whether current surface matches name input
+                if strcmp(obj.control_surfaces(i).name,name)
+                    
+                    % checks whether user wants to deflect the vectors by
+                    % the current CS deflection, or by a user input one
+                    if flag_extra_rotation == 0 
+                        theta_rad = deg2rad(obj.control_surfaces(i).delta);
+                        
+                        % if the surface is symmetric, but its deflection
+                        % isn't, the deflection we are interested into is
+                        % stored within delta_l_r(1), not delta.
+                        if obj.control_surfaces(i).is_sym_defl == 0 && obj.control_surfaces(i).is_sym == 1
+                            theta_rad = deg2rad(obj.control_surfaces(i).delta_l_r(1));
+                        end
+                    end
+                    
+                    % if the CS in question is a spoiler, we always want to
+                    % rotate the vectors by the Spoiler deflection
+                    if obj.control_surfaces(i).pos == 2
+                        theta_rad = deg2rad(obj.control_surfaces(i).delta);
+                    end
+                    
+                    % calculates rotation matrix using CS specific rotation
+                    % vector and K_mat, complemented by the desired
+                    % rotation angle
+                    rotation_matrix = eye(3) + sin(theta_rad) * obj.K_mat(:,:,i) + (1 - cos(theta_rad)) * obj.K_mat(:,:,i)^2;
+                    
+                    % loops through all normal vectors belonging to the
+                    % current CS, and deflects them using the rotation
+                    % matrix.
+                    
+                    % TODO: REWRITE LOOP BELOW SO THAT IT RUNS AS A SINGLE
+                    % MATRIX OPERATION, RATHER THAN A DUMB FOR LOOP.
+                    for panel_count = 1:length(obj.control_surfaces(i).panelIds)
+                        obj.colloc_nvec(:,obj.control_surfaces(i).panelIds(panel_count)) = rotation_matrix * obj.colloc_nvec(:,obj.control_surfaces(i).panelIds(panel_count));
+                    end
+                    
+                    
+                    % code below does the same as its equivalent code
+                    % above, only for symmetric equivalent of current CS
+                    if obj.control_surfaces(i).is_sym == 1
+                        
+                        theta_rad_sym = deg2rad(deflection); %or maybe deflection(2) would be better?
+                        
+                        if obj.control_surfaces(i).pos == 2
+                            theta_rad_sym = deg2rad(obj.control_surfaces(i).delta);
+                        end
+                        
+                        if flag_extra_rotation == 0 
+                            theta_rad_sym = deg2rad(obj.control_surfaces(i).delta);
+                            if obj.control_surfaces(i).is_sym_defl == 0
+                                theta_rad_sym = -deg2rad(obj.control_surfaces(i).delta_l_r(2));
+                            end
+                        end
+                        
+                        rotation_matrix = eye(3) + sin(theta_rad_sym) * obj.K_mat_sym(:,:,i) + (1 - cos(theta_rad_sym)) * obj.K_mat_sym(:,:,i)^2;
+
+                        % TODO: REWRITE LOOP BELOW SO THAT IT RUNS AS A SINGLE
+                        % MATRIX OPERATION, RATHER THAN A DUMB FOR LOOP.
+                        for panel_count = 1:length(obj.control_surfaces(i).panelIds)
+                            obj.colloc_nvec(:,obj.control_surfaces(i).panelIdsL(panel_count)) = rotation_matrix * obj.colloc_nvec(:,obj.control_surfaces(i).panelIdsL(panel_count));
+                        end
+                    end
+                end
             end
         end
         
@@ -806,7 +1005,7 @@ classdef class_VLM_solver
         
         function obj=determine_boundary_conditions(obj)
             for i=1:1:length(obj.colloc)
-                obj.b(i)=-dot(obj.colloc_nvec(:,i),obj.Uinf)*(4*pi);
+                obj.b(i)=-(obj.colloc_nvec(1,i)*obj.Uinf(1)+obj.colloc_nvec(2,i)*obj.Uinf(2)+obj.colloc_nvec(3,i)*obj.Uinf(3))*(4*pi);
             end
         end
         
@@ -885,76 +1084,18 @@ classdef class_VLM_solver
             %obj.wind=obj.Cind*obj.Gamma/(4*pi);
         end
         function obj=solve_MEX_vor5(obj) % in vor5, the Cind Matrix contains the influence coefficients on the 1/4 point of each panel
-            [obj.C,cc1,cc2,cc3]=compute_influence_coefficients_vor5(obj.grid,obj.panels,obj.te_idx',obj.colloc(:,:),obj.colloc_nvec(:,:),obj.Uinf);
-            obj.Cind=[cc1,cc2,cc3];
+            
+            if isempty(obj.C)
+                [obj.C,cc1,cc2,cc3]=compute_influence_coefficients_vor5(obj.grid,obj.panels,obj.te_idx',obj.colloc(:,:),obj.colloc_nvec(:,:),obj.Uinf);
+                obj.Cind=[cc1,cc2,cc3];
+            end
+            
             obj=obj.determine_boundary_conditions();
             obj.Gamma=linsolve(obj.C,obj.b');
             %obj.wind=obj.Cind*obj.Gamma/(4*pi);
         end
         function obj=f_postprocess(obj,CD_f)
-        % as second input either 'quick' for no
-            alpha=atan(obj.Uinf(3)/obj.Uinf(1));
-            beta=atan(obj.Uinf(2)/obj.Uinf(1));
-            if obj.Ma_corr<1
-                beta_inf=obj.Ma_corr;
-            else
-                beta_inf=1;
-            end
-            M_BA=[  cos(alpha)*cos(beta) , -cos(alpha)*sin(beta), -sin(alpha);
-                sin(beta)             , cos(beta)            ,    0;
-                sin(alpha)*cos(beta) , -sin(alpha)*sin(beta), cos(alpha);];
-            
-			%determine downwash at the one quarter point
-            nPanels = size(obj.panels,2);
-            u=(obj.Cind(:,1:nPanels)*obj.Gamma)/(4*pi);
-            v=obj.Cind(:,nPanels+1:2*nPanels)*obj.Gamma/(4*pi);
-            w=obj.Cind(:,2*nPanels+1:3*nPanels)*obj.Gamma/(4*pi);
-
-
-
-
-
-            for i=1:1:length(obj.Gamma)
-
-                p_i=0.75*obj.grid(:,obj.panels(1,i))+0.25*obj.grid(:,obj.panels(4,i));
-                p_o=0.75*obj.grid(:,obj.panels(2,i))+0.25*obj.grid(:,obj.panels(3,i));
-                sp=p_o-p_i;
-
-                %obj.crossp(:,i)=(obj.rho*obj.Gamma(i)*cross(sp',obj.Uinf'))';
-                
-%                 obj.Uinf(3)=obj.Uinf(3)+uvwind(3); 
-%                 obj.Uinf(2)=obj.Uinf(2)+uvwind(2);
-%                 obj.Uinf(1)=obj.Uinf(1)+uvwind(1);
-%                 
-                obj.F_body(:,i)=1/beta_inf*(obj.rho*obj.Gamma(i)*cross(sp',(obj.Uinf+[u(i),v(i),w(i)])'))';                
-                %nastran way of force computation
-%                 obj.F_body(:,i)=1/beta_inf*(obj.rho*obj.Gamma(i)*norm(sp)*obj.colloc_nvec(:,i)'*norm((obj.Uinf+0*[u(i),v(i),w(i)])))';
-
-                obj.M_body(:,i)=zeros(3,1);
-               % obj.F_body(2,i)=-obj.F_body(2,i);
-                
-                %alpha2=atan((obj.Uinf(3)+uvwind(3))/(obj.Uinf(1)+uvwind(1)));
-                %beta=atan((obj.Uinf(2)+uvwind(2))/(obj.Uinf(1)+uvwind(1)));
-                
-                alpha=atan((obj.Uinf(3))/(obj.Uinf(1)));
-                beta=atan((obj.Uinf(2))/(obj.Uinf(1)));
-                %                alphai(i)=alpha-alpha2;
-                
-                M_BA=[  cos(alpha)*cos(beta) , -cos(alpha)*sin(beta), -sin(alpha);
-                    sin(beta)             , cos(beta)            ,    0;
-                    sin(alpha)*cos(beta) , -sin(alpha)*sin(beta), cos(alpha);];
-                obj.F_aero(:,i)=M_BA'*obj.F_body(:,i);
-                % obj.F_aero(:,i)=(obj.rho*obj.Gamma(i)*cross(sp',obj.Uinf'))';
-                % obj.cdi(:,i)=-(obj.rho*obj.Gamma(i)*obj.wind(i)*cross(sp',obj.Uinf'/norm(obj.Uinf)))';
-                % obj.cdi(:,i)=M_BA'*(obj.rho*obj.Gamma(i)*cross(sp',(obj.Uinf'+uvwind)/norm(obj.Uinf+uvwind')))';
-                sc=(norm(obj.grid(:,obj.panels(4,i))-obj.grid(:,obj.panels(1,i)))+norm(obj.grid(:,obj.panels(3,i))-obj.grid(:,obj.panels(2,i))))/2;
-                obj.cp(i)=1/beta_inf*2*obj.Gamma(i)/(norm(obj.Uinf)*sc);
-                
-                %obj.A(i)=norm(cross(obj.grid(:,obj.panels(2,i))-obj.grid(:,obj.panels(1,i)),obj.grid(:,obj.panels(4,i))-obj.grid(:,obj.panels(1,i))));
-                obj.cl(:,i)=obj.F_body(:,i)/(obj.qinf*obj.reference.S_ref);
-            end
-            
-            %obj.Clq=sum(obj.r(1,:)*obj.A(i))/(obj.reference.S_ref);
+            [ obj.F_body, obj.M_body, obj.F_aero,  obj.cp,  obj.cl, M_BA ] = f_postprocess_outside(  obj.Uinf,  obj.Ma_corr, obj.panels,  obj.Cind,  obj.Gamma,  obj.grid,  obj.rho,  obj.qinf,  obj.reference.S_ref );
             
             obj.cx=obj.F_body(1,:)/(obj.qinf*obj.reference.S_ref);
             obj.cy=obj.F_body(2,:)/(obj.qinf*obj.reference.S_ref);
@@ -1231,12 +1372,12 @@ classdef class_VLM_solver
             tolerance=0.0001;
                      
             obj.Uinf=a2bf(norm(obj.Uinf),alpha_0,obj.state.beta,obj.Ma_corr);
-            obj=obj.f_solve_std();
-            Cl_1=obj.CZ;
+            obj=obj.f_solve_fast();
+            Cl_1=obj.Cl;
             alpha_0=5;
             obj.Uinf=a2bf(norm(obj.Uinf),alpha_0,obj.state.beta,obj.Ma_corr);
             obj=obj.f_solve_fast();
-            Cl_prev=obj.CZ;
+            Cl_prev=obj.Cl;
             dCLalpha=Cl_prev-Cl_1;
             dalpha=(Cl_target-Cl_prev)/dCLalpha;
             alpha=alpha_0+dalpha;
@@ -1244,14 +1385,14 @@ classdef class_VLM_solver
             obj=obj.f_solve_fast();
             dCLalpha=(obj.CZ-Cl_prev)/dalpha;
             i=1;
-            while abs(obj.CZ-Cl_target)>tolerance
-                Cl_prev=obj.CZ;
+            while abs(obj.Cl-Cl_target)>tolerance
+                Cl_prev=obj.Cl;
                 dalpha=(Cl_target-Cl_prev)/dCLalpha;
                 alpha=alpha+dalpha;
                 obj.Uinf=a2bf(norm(obj.Uinf),alpha,obj.state.beta,obj.Ma_corr);
                 obj=obj.f_solve_fast();
                 i=i+1;
-                dCLalpha=(obj.CZ-Cl_prev)/dalpha;
+                dCLalpha=(obj.Cl-Cl_prev)/dalpha;
                 if i>30
                     sprintf('f_solve_for_Cl did not converge!')
                     break;
@@ -1263,7 +1404,7 @@ classdef class_VLM_solver
         
         function obj=f_solve_for_Cl(obj,Cl_target)
             %% TODO: validate, enable entering of alpha start and tolerance
-            alpha_0=0;
+            alpha_0=obj.state.alpha;
             tolerance=0.0001;
             
             
@@ -1350,6 +1491,104 @@ classdef class_VLM_solver
                 hold on
             end
             axis equal
+        end
+        
+        % function used to conveniently plot the cp of a specific 2D
+        % section of the wing. The section is chosen by specifying the
+        % wing index, the wingsegment index, and the eta of the segment.
+        % The latter is simply the eta cooridinate of the chosen section
+        % within the wingsegment coordinate system. Since the cp is
+        % discretized with panels, the function plots the cp of the
+        % chordwise panels falling within the given eta. The selection of
+        % the proper span station is done at the leading edge (in case the
+        % chordwise panels are not aligned with the chord, but this should
+        % not happen)
+        function ax1 = plot_cp_section(obj,segment,eta_section,legend_name, line_spec, varargin)
+            
+            % the wing segment object of interest is stored within segment
+            
+            % array of etas of each chordwise line dividing the different span
+            % stations of segments. eta_seg has to be rounded down to closest
+            % match within the eta_panels array in order to return the
+            % correct span wise station.
+            eta_panel_borders = linspace(0,1,segment.n_span+1);
+            
+            % eta_larger_logic contains all border before the eta_section
+            eta_larger_logic = eta_panel_borders(eta_panel_borders<=eta_section);
+            
+            % the index of last border to be before the eta of interest
+            % gives us the span station of the section of interest
+            section_span_station = length(eta_larger_logic);
+            
+            % nr of panels along chord obtained by dividing nr of total panels by
+            % nr of span stations.
+            n_panels_chordwise = size(segment.panels,2) / segment.n_span;
+            
+            % gives panel indices of chordwise panels at span station of
+            % interest
+            panel_indices = (n_panels_chordwise * (section_span_station-1) : n_panels_chordwise * section_span_station - 1) + segment.panel_start_idx;
+            
+            % chordwise panel of the current pressure point
+            chordwise_panel_ixd_plot = 1:n_panels_chordwise;
+            
+            % panel index (within plot) of TE of slat
+            slat_TE_idx = segment.n_le_panels;
+            
+            % panel index (within plot) of LE and TE of spoiler
+            spoiler_LE_idx = segment.n_le_panels + segment.n_ctr1_panels + 1;
+            spoiler_TE_idx = spoiler_LE_idx + segment.n_sp_panels + segment.n_te_panels_overlap;
+            
+%             spoiler_TE_idx = spoiler_LE_idx + segment.n_sp_panels - 1;
+            
+            % panel index (within plot) of LE of flap
+            flap_LE_idx = n_panels_chordwise - segment.n_te_panels + 1;
+            
+            if nargin < 6
+                ax1 = axes;
+            elseif nargin == 6
+                ax1 = varargin{1};
+            elseif nargin == 7
+                if varargin{1} == 0
+                    ax1 = axes;
+                else
+                    ax1 = varargin{1};
+                end
+            end
+            
+            hold(ax1, 'on');
+            if nargin <= 6
+                main_line = plot(chordwise_panel_ixd_plot, obj.cp(panel_indices),line_spec,'DisplayName',legend_name, 'Parent', ax1);
+            elseif nargin == 7
+                main_line = plot(chordwise_panel_ixd_plot, varargin{2}(panel_indices),line_spec,'DisplayName',legend_name, 'Parent', ax1);
+            end
+            
+            if slat_TE_idx ~= 0
+                slat_TE_plt = plot([slat_TE_idx;slat_TE_idx], [-5,2]',line_spec, 'Parent', ax1);
+                text(ax1, slat_TE_idx,0, {'Slat TE'});
+                set(get(get(slat_TE_plt, 'Annotation'), 'LegendInformation'), 'IconDisplayStyle', 'off');
+            end
+            
+            if spoiler_TE_idx ~= spoiler_LE_idx
+                spoiler_LE_plt = plot([spoiler_LE_idx;spoiler_LE_idx], [-5,2]',line_spec, 'Parent', ax1);
+                text(ax1, spoiler_LE_idx,-0.75, {'Spoiler LE'});
+                set(get(get(spoiler_LE_plt, 'Annotation'), 'LegendInformation'), 'IconDisplayStyle', 'off');
+                
+                spoiler_TE_plt = plot([spoiler_TE_idx;spoiler_TE_idx], [-5,2]',line_spec, 'Parent', ax1);
+                text(ax1, spoiler_TE_idx,-1, {'Spoiler TE'});
+                set(get(get(spoiler_TE_plt, 'Annotation'), 'LegendInformation'), 'IconDisplayStyle', 'off');
+            end
+            
+            if flap_LE_idx ~= n_panels_chordwise
+                slat_TE_plt = plot([flap_LE_idx;flap_LE_idx], [-5,2]',line_spec, 'Parent', ax1);
+                text(ax1, flap_LE_idx,0, {'Flap LE'});
+                set(get(get(slat_TE_plt, 'Annotation'), 'LegendInformation'), 'IconDisplayStyle', 'off');
+            end
+            
+            set(ax1,'Ydir','reverse');
+            title(ax1, 'CP along 2D chordwise section')
+            xlabel(ax1, 'chordwise panel NR')
+            ylabel(ax1, 'CP') 
+            legend(ax1,'-DynamicLegend');
         end
         
         function obj=write_tecplot(obj,filename,varargin)
@@ -1604,6 +1843,79 @@ classdef class_VLM_solver
             	originMoment=originMoment+cross(obj.r(:,CSPanels(iCSPanel))+obj.reference.p_ref'-hingeOrigin,obj.F_body(:,CSPanels(iCSPanel)));
             end
             hingeMoment=dot(originMoment,hingeAxis);
+        end
+        function []=plot_section(obj,p1, p2, p3,dSpacing)
+            % compute points
+            minX=min([p1(1),p2(1),p3(1)]);
+            maxX=max([p1(1),p2(1),p3(1)]);
+            minY=min([p1(2),p2(2),p3(2)]);
+            maxY=max([p1(2),p2(2),p3(2)]);
+            minZ=min([p1(3),p2(3),p3(3)]);
+            maxZ=max([p1(3),p2(3),p3(3)]);
+            
+            normal = cross(p1 - p2, p1 - p3);
+            d = p1(1)*normal(1) + p1(2)*normal(2) + p1(3)*normal(3);
+            d = -d;
+            if abs(normal)/norm(normal)==[1 0 0]
+                
+                y = minY:dSpacing:maxY; z = minZ:dSpacing:maxZ;
+                [Y,Z] = meshgrid(y,z);
+                points=[ones(size(Y(:)))*minX,Y(:),Z(:)]';
+                [cc1,cc2,cc3]=compute_influence_coefficients_vor6(obj.grid,obj.panels,obj.te_idx',points,repmat(abs(normal')/norm(normal),1,size(points,2)),obj.Uinf);
+                % compute velocity at all points in 3 directions
+                u=obj.Uinf(1)+cc1(:,1:size(obj.Gamma,1))*obj.Gamma;
+                v=obj.Uinf(2)+cc2(:,1:size(obj.Gamma,1))*obj.Gamma;
+                w=obj.Uinf(3)+cc3(:,1:size(obj.Gamma,1))*obj.Gamma;
+            elseif abs(normal)/norm(normal)==[0 1 0]
+                
+                x = minX:dSpacing:maxX;  z = minZ:dSpacing:maxZ;
+                [X,Z] = meshgrid(x,z);
+                points=[X(:),ones(size(X(:)))*minY,Z(:)]';
+                [cc1,cc2,cc3]=compute_influence_coefficients_vor6(obj.grid,obj.panels,obj.te_idx',points,repmat(abs(normal')/norm(normal),1,size(points,2)),obj.Uinf);
+                % compute velocity at all points in 3 directions
+                u=obj.Uinf(1)+cc1(:,1:size(obj.Gamma,1))*obj.Gamma;
+                v=obj.Uinf(2)+cc2(:,1:size(obj.Gamma,1))*obj.Gamma;
+                w=obj.Uinf(3)+cc3(:,1:size(obj.Gamma,1))*obj.Gamma;
+                vel=sqrt(u.^2+v.^2+w.^2);
+                U=reshape(u,length(z),length(x));
+                V=reshape(v,length(z),length(x));
+                W=reshape(w,length(z),length(x));
+                
+                VEL=sqrt(U.^2+V.^2+W.^2);
+                CP=1-(VEL/norm(obj.Uinf)).^2;
+                %%
+                figure; imagesc(x,z,CP);
+                hold on;
+               caxis([-10 1])
+%                streamline(X,Z,U,V, [repmat(minX,1,length(z))  x,x],[z repmat(minZ,1,length(x)) repmat(maxZ,1,length(x))])
+                xlabel('x')
+                ylabel('z')
+                colorbar
+                %%
+            elseif abs(normal)/norm(normal)==[0 0 1]
+                
+                x = minX:dSpacing:maxX;  y = minY:dSpacing:maxY;
+                [X,Y] = meshgrid(x,y);
+                points=[X(:),Y(:),ones(size(Y(:)))*minZ]';
+                [cc1,cc2,cc3]=compute_influence_coefficients_vor6(obj.grid,obj.panels,obj.te_idx',points,repmat(abs(normal')/norm(normal),1,size(points,2)),obj.Uinf);
+                % compute velocity at all points in 3 directions
+                u=obj.Uinf(1)+cc1(:,1:size(obj.Gamma,1))*obj.Gamma;
+                v=obj.Uinf(2)+cc2(:,1:size(obj.Gamma,1))*obj.Gamma;
+                w=obj.Uinf(3)+cc3(:,1:size(obj.Gamma,1))*obj.Gamma;
+            else
+                x = minX:dSpacing:maxX; y = minY:dSpacing:maxY;
+                [X,Y] = meshgrid(x,y);
+                Z = (-d - (normal(1)*X) - (normal(2)*Y))/normal(3);
+                points=[X(:),Y(:),Z(:)]';
+                [cc1,cc2,cc3]=compute_influence_coefficients_vor6(obj.grid,obj.panels,obj.te_idx',points,repmat(abs(normal')/norm(normal),1,size(points,2)),obj.Uinf);
+                % compute velocity at all points in 3 directions
+                u=obj.Uinf(1)+cc1(:,1:size(obj.Gamma,1))*obj.Gamma;
+                v=obj.Uinf(2)+cc2(:,1:size(obj.Gamma,1))*obj.Gamma;
+                w=obj.Uinf(3)+cc3(:,1:size(obj.Gamma,1))*obj.Gamma;
+                quiver3(points(1,:),points(2,:),points(3,:),u',v',w',2)
+            end
+            
+            
         end
     end
     

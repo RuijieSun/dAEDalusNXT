@@ -36,8 +36,10 @@ function fuselage = f_calc_mass(fuselage,weights)
     
     fuselage.n_PAX=weights.NumberPAX;
     
-    disp('            performing eigenmass calculation');
-
+    observer = 0;
+    if observer
+		disp('            performing eigenmass calculation');
+	end
     for i=1:1:fuselage.nel
         
         [r]=fuselage.beamelement(i).crosssection.get_dimensions();            

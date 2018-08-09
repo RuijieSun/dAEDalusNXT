@@ -1,0 +1,55 @@
+<daedalus>
+	<aircraft name="SimpleWing" >
+		<reference>
+			<area>120</area>
+			<length>10</length>
+			<span>60</span>
+			<point>
+				<x>0.0</x>
+				<y>0.0</y>
+				<z>0.0</z>
+			</point>
+		</reference>
+		<wings>
+			<wing name="MainWing" symmetric="1">
+				<segment ID="1">
+					<location>
+						<x>0</x>
+						<y>0</y>
+						<z>0</z>
+					</location>
+					<dihedral> 5</dihedral>
+					<le_sweep> 30</le_sweep>
+					<span>30</span>
+					<root_chord>12</root_chord>
+					<tip_chord> 2 </tip_chord>
+					<root_twist> 0</root_twist>
+					<tip_twist>0</tip_twist>
+					<root_profile> NACA0012 </root_profile>
+					<tip_profile> NACA0012 </tip_profile>
+					<wingbox type="StandardWingbox">
+						<root_frontspar> 0.15 </root_frontspar>
+						<tip_frontspar> 0.15 </tip_frontspar>
+						<root_rearspar> 0.60 </root_rearspar>
+						<tip_rearspar> 0.60 </tip_rearspar>
+						<is_fueled > 1 </is_fueled>
+						<material type="aluminum" ></material>
+					</wingbox>  
+				</segment>
+			</wing>
+		</wings>
+		<weights>
+			<wing_weights>
+				<wing_weight name="MainWing">
+					<SystemsEstimate> 3000</SystemsEstimate>
+					<SkinEstimate> 3000</SkinEstimate>
+				</wing_weight>
+			</wing_weights>
+		</weights>
+		<specialsettings>
+			<wingbox_fueling_factor> 0.95 </wingbox_fueling_factor>
+			<wing_t_min_sk> 3e-3 </wing_t_min_sk>
+			<wing_t_min_sp> 3e-3 </wing_t_min_sp>
+		</specialsettings>
+	</aircraft>
+</daedalus>

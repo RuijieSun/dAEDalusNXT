@@ -105,10 +105,15 @@ classdef class_crosssection_wingbox < class_crosssection
         safety_factor = 1.5;
         fueling_factor = 1;
         
+        %> stress upper skin
         sigma_sk_up = 0;
+        %> stress lower skin
         sigma_sk_lo = 0;
+        %> stress front spar
         sigma_sp_fr = 0;
+        %> stress rear spar
         sigma_sp_re = 0;
+        %> index of the wing_segment this crosssection belongs to
         segment_index = 0;
     end
     
@@ -210,6 +215,10 @@ classdef class_crosssection_wingbox < class_crosssection
             
             obj.t_min_sk=t_min_sk;
             obj.t_min_sp=t_min_sp;
+            obj.t_sk_lo=t_min_sk;
+            obj.t_sk_up=t_min_sk;
+            obj.t_sp_fr=t_min_sp;
+            obj.t_sp_re=t_min_sp;
         end
         
         function [h,w,c, h_fs, h_rs]=get_dimensions(obj)

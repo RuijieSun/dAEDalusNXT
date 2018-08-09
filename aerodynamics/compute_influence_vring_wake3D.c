@@ -35,7 +35,6 @@ void compute_influence_vring(double *grid,double *panels, double *colloc,double 
     int doomed;
     doomed=0;
     for (k=0;k<n_panels;k++){
-	//for (k=0;k<10;k++){
         
         vortex[0]=*(grid+((int)*(panels+4*k)-1)*3);
         vortex[1]=*(grid+((int)*(panels+4*k)-1)*3+1);
@@ -53,13 +52,7 @@ void compute_influence_vring(double *grid,double *panels, double *colloc,double 
         vortex[10]=*(grid+((int)*(panels+4*k+3)-1)*3+1);
         vortex[11]=*(grid+((int)*(panels+4*k+3)-1)*3+2);
         
-      // mexPrintf("x   %f  %f  %f %f  \n",vortex[0],vortex[4],vortex[7],vortex[10]);
-      // mexPrintf("y   %f  %f  %f %f  \n",vortex[1],vortex[5],vortex[8],vortex[11]);
-      // mexPrintf("z   %f  %f  %f %f  \n",vortex[3],vortex[6],vortex[9],vortex[12]);
-      // mexPrintf("hallooo   %d, %d \n",(int)*(te_idx+(((int)*(panels+4*k+3))-1)-1)-1,(int)*(te_idx+(((int)*(panels+4*k+2))-1)-1)-1);
-      // mexPrintf("hallooo2   %d, %d \n",((int)*(panels+4*k+3)-1),(((int)*(panels+4*k+2)-1)-1)-1);
         for (j=0;j<n_colloc;j++){
-		//for (j=0;j<10;j++){
             wAB_1=0;
             wAB_2=0;
             wAB_3=0;
@@ -117,13 +110,10 @@ void compute_influence_vring(double *grid,double *panels, double *colloc,double 
                 coredist=sqrt(r1xr0_1*r1xr0_1+r1xr0_2*r1xr0_2+r1xr0_3*r1xr0_3)/norm_r0;
                 
                 if (coredist<0.19){
-                    // improve for vertical elements(r03!!)
                     if (abs(r01)>0.1){
                         lambda=(r11)/r01;
-                       // lambda=(p1/r01-a1/r01+a2/n2*n1-p3/n2*n1)/(1-r02/n2*n1);
                     }
                     else{
-                        //lambda=(p3/r02-a2/r02+a1/n1*n2-p1/n1*n2)/(1-r01/n1*n2);
                         lambda=r12/r02;
                     }
                     
@@ -164,7 +154,7 @@ void compute_influence_vring(double *grid,double *panels, double *colloc,double 
                     }
                 }
 
-                if  ( (!((normr1<=1E-7)||(normr2<=1E-7))) && coredist>0.01)
+                if  ( (!((normr1<=1E-7)||(normr2<=1E-7))) && coredist>1E-7)
                 {
                     r1dr2_1=r11/normr1-r21/normr2;
                     r1dr2_2=r12/normr1-r22/normr2;
@@ -176,38 +166,15 @@ void compute_influence_vring(double *grid,double *panels, double *colloc,double 
                     wAB_2=wAB_2-r1xr2_2/(norm_r1xr2*norm_r1xr2)*dotp_r0_r1dr2;
                     wAB_3=wAB_3-r1xr2_3/(norm_r1xr2*norm_r1xr2)*dotp_r0_r1dr2;
                 }
-                else
-            //    {
-            //    mexPrintf("no influence i j k %d %d %d\n",i,j,k);
-             //   }
             }
             if (doomed==1){
              //wAB_1=0;
              //wAB_2=0;
              //wAB_3=0;         
             }
-           //  *(w+n_colloc*k+j)=*(colloc_nvec+j*3)*wAB_1+*(colloc_nvec+1+j*3)*wAB_2+*(colloc_nvec+2+j*3)*wAB_3;
-            //if ((wAB_1>-20)&&(wAB_1<20)){
-                *(w1+n_colloc*k+j)=wAB_1;
-           // }
-           // else{
-           //     *(w1+n_colloc*k+j)=0;
-           // } 
-         //  if ((wAB_2>-20)&&(wAB_2<20)){
+           *(w1+n_colloc*k+j)=wAB_1;
            *(w2+n_colloc*k+j)=wAB_2;
-         //  }
-         //  else{
-         //       *(w2+n_colloc*k+j)=0;
-         //  }
-         //  if ((wAB_3>-20)&&(wAB_3<20)){  
            *(w3+n_colloc*k+j)=wAB_3;
-         //  }
-         //  else
-         //  {
-          //    *(w3+n_colloc*k+j)=0;  
-          // }
-           // mexPrintf("   %f \n",*(w+n_colloc*k+j)/(4*3.141592));
-           // *(wind+n_colloc*k+j)=*(colloc_nvec+j*3)*wAB_1+*(colloc_nvec+1+j*3)*wAB_2+*(colloc_nvec+2+j*3)*wAB_3;
         }
     }
 }

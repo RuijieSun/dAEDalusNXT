@@ -99,16 +99,19 @@ classdef class_wing < class_beam
         
         %> local y coordinate runlength of wing from root to tip
         wing_frontview_length=0;       
+        
 
     end
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Class Methods
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     methods (Access=public)
-         % constructor
-         function obj = class_wing(nel, crosssections, varargin)
+         % constructor. The anisotropic flag is used to indicate whether
+         % the wing is made of anisotropic material. If that is the case,
+         % the flag is saved within the beam object.
+         function obj = class_wing(nel, crosssections, anisotropic_flag, varargin)
             %call class_beam constructor 
-            obj=obj@class_beam(nel, crosssections, varargin);
+            obj=obj@class_beam(nel, crosssections, anisotropic_flag,varargin);
             obj.deltanu=zeros((length(crosssections)*6+6)/3,1);
          end
          
@@ -163,7 +166,7 @@ classdef class_wing < class_beam
          %obj=f_assemble(obj,add_eigenmass,add_fuelmass,add_engineforces,add_gearforces);
 
          % initialize elements with material properties
-         obj=f_init_material_properties(obj,structure);
+         obj=f_init_material_properties(obj,structure,anisotropic_flag, layup_settings);
          
          function obj=f_set_fueling_state(obj,fueling_state)
              
@@ -393,9 +396,9 @@ classdef class_wing < class_beam
             else
                  t_max=0;
                 t_min=100;
-                tk=[t_sk_lo t_sk_up t_sp_fr t_sp_re]
-                t_max=max([tk t_max])
-                t_min=min([tk t_min])
+                tk=[t_sk_lo t_sk_up t_sp_fr t_sp_re];
+                t_max=max([tk t_max]);
+                t_min=min([tk t_min]);
             end
             
             for i=1:1:length(wing.beamelement)
@@ -789,6 +792,23 @@ classdef class_wing < class_beam
          function obj=f_set_fuelingFactor(obj,fuelingFactor)
              for i=1:length(obj.beamelement)
                 obj.beamelement(i).crosssection.fueling_factor=fuelingFactor;
+             end
+         end
+         
+         
+         % This function creates all the data necessary for the cross
+         % sectional modeller to start running. It also initializes the
+         % modller.
+         function obj = cross_sectional_modeler(obj,wing_settings)
+             
+             % loops over each beam-element
+             for i = 1:obj.nel
+                 
+                 % Discretizes the cross section of the current beam-element in the amount of shell elements specified within wing_settings
+                 obj.beamelement(i).crosssection = obj.beamelement(i).crosssection.discretize_cross_section(wing_settings.ds_nodes_crosssection_element,wing_settings.nr_nodes_crosssection_element);
+                 
+                 % Runs the cross sectional modeller for the current beam-element
+                 obj.beamelement(i).crosssection = obj.beamelement(i).crosssection.cross_sectional_modeler();
              end
          end
     end  

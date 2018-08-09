@@ -20,8 +20,17 @@ function [obj] = f_calc_element_mass(obj)
     if el_ndof==6
          for i=1:obj.nel   
             %Calculate Element mass Matrices
-            obj.beamelement(i)=obj.beamelement(i).elM_6dof();    
-            obj.beamelement(i)=obj.beamelement(i).elM_lumped_6dof(); 
+            
+            % Checks if the beam is anisotropic. If so, it runs the
+            % anistropic versions of the elM_6dof and elM_lumped_6dof
+            % functions.
+            if obj.anisotropic == 1
+                obj.beamelement(i)=obj.beamelement(i).elM_6dof_anisotropic();    
+                obj.beamelement(i)=obj.beamelement(i).elM_lumped_6dof_anisotropic(); 
+            else
+                obj.beamelement(i)=obj.beamelement(i).elM_6dof();    
+                obj.beamelement(i)=obj.beamelement(i).elM_lumped_6dof(); 
+            end
          end
     else
         % number of ndof not implemented
