@@ -54,15 +54,17 @@ classdef class_FF_Controller
         function obj=genSSM(obj,Ts)
             obj.Ts=Ts;
             FFController = tf(zeros(length(obj.outputName),1));
+            denom=[1 zeros(1,obj.order-1)];
+            nCs=length(obj.outputName);
             for iCS=1:length(obj.outputName)
-                FFController(iCS)=tf(obj.coeff((iCS-1)*obj.order+1:iCS*obj.order),                [1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0],Ts);
+                FFController(iCS)=tf(obj.coeff((iCS-1)*obj.order+1:iCS*obj.order),              denom,Ts);
             end
             
             opt = d2cOptions('Method','tustin','PrewarpFrequency',0.5);
-            obj.contSSM = ss((d2c(FFController, opt)*obj.highPass*obj.delay));
+            obj.contSSM = d2c(ss(FFController),opt)*obj.highPass*obj.delay;
             obj.contSSM.InputName = {'aoaProbeIn'};
             obj.contSSM.OutputName = obj.outputName;
-            obj.contSSM.StateName = cellstr([repmat('ffCtr_',obj.order-1+3,1) num2str([1:obj.order-1+3]','%04d')]);
+            obj.contSSM.StateName = cellstr([repmat('ffCtr_',length(obj.contSSM.StateName),1) num2str([1:length(obj.contSSM.StateName)]','%04d')]);
         end
         function obj=bode(obj)
             N=obj.order;

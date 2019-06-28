@@ -32,6 +32,8 @@ classdef AeSSMSettings
         rbmInputs =1
         %flag for controlInputs
         ctrInputs =1
+        %flag for cs def outputs for monitoring
+        csMonitor=1
         %flag for panel velocity inputs
         vPInputs =0
         % array of load stations for local load outputs
@@ -62,6 +64,8 @@ classdef AeSSMSettings
         % contTurbSignal (uPCP and uSCP are stored once created in order to
         % enable optimization without randomness)
         contTurbSignal
+        % flag for use of nonlinear act model including rate/def limits
+        nonlinActLimits=0;
     end
     
     methods

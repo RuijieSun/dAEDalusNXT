@@ -12,12 +12,14 @@ classdef AeSSM
     properties
         % transformed UVLM 
         tUvlmSSM
-        % Str data struct for Simulink Model
+        % Flight dynamic ssm struct
+        fdSSM
+        % Str data struct for lin Model
         strSSM
-        % TAS data struct for Simulink Model (transformation from str to
+        % TAS data struct for lin Model (transformation from str to
         % aero displacements/boundary condition)
         tAS
-        % TSA data struct for Simulink Model (transformation from aero to
+        % TSA data struct for lin Model (transformation from aero to
         % str froces (modal))
         tSA
         % controllers
@@ -88,7 +90,7 @@ classdef AeSSM
 			obj=obj.initCouplingMatrices(aircraft,aircraft_structure);
 			
             % init Actuator Models (use default values for now)
-            obj=obj.initActuatorModels();
+            obj=obj.initActuatorModels(obj.settings.nonlinActLimits);
             
             % init Sensor Models (position of aoa probe only)
             obj=obj.initSensorModels(aircraft);
@@ -121,10 +123,9 @@ classdef AeSSM
             obj.uvlm=class_UVLM_solver(aircraft,obj.state,uvlmSettings);
             obj.uvlm=obj.uvlm.generateSSM(aircraft);
             
-		end
-		
-        function obj=initSTRModel(obj,aircraft_structure)
-		
+        end
+        
+        function obj=initFdSSM(obj, m, cg, Inertia)
             %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
             % Prepare FD Model
             % velocity of the FLOW seen from the aeroBodySystem (positive
@@ -136,13 +137,6 @@ classdef AeSSM
             flowDir=obj.state.V_inf./flowAbs;
             V1=flowAbs;
             V2=(flowAbs-10);
-            if length(aircraft_structure.nodal_deflections)~=length(aircraft_structure.Mglob_lumped)
-                aircraft_structure.nodal_deflections=[];
-            end
-            cg=aircraft_structure.f_compute_CG';
-            cg(2)=0;
-            m=aircraft_structure.f_compute_totalMass;
-            Inertia=aircraft_structure.f_compute_moment_of_inertia(cg);
             fdSSM1=createFDSSM(m,V1*flowDir.*[1 -1 1],[0 obj.state.alpha -obj.state.beta]*pi/180,[0 0 0]', Inertia, 9.81);
             fdSSM2=createFDSSM(m,V2*flowDir.*[1 -1 1],[0 obj.state.alpha -obj.state.beta]*pi/180,[0 0 0]', Inertia, 9.81);
             fd_dadV=(fdSSM1.a-fdSSM2.a)./(V1-V2);
@@ -153,11 +147,6 @@ classdef AeSSM
             fd_b0=fdSSM1.b-fd_dbdV*V1;
             fd_c0=fdSSM1.c-fd_dcdV*V1;
             fd_d0=fdSSM1.d-fd_dddV*V1;
-            fd_inputName=fdSSM1.InputName;
-            fd_outputName=fdSSM1.OutputName;
-            fd_stateName=fdSSM1.StateName;
-            fd_outputGroup=fdSSM1.OutputGroup;
-            fd_inputGroup=fdSSM1.InputGroup;
             % Transformation of L M N from reference point used in
             % aerodynamics to the CG
             D=eye(6);
@@ -169,13 +158,44 @@ classdef AeSSM
             % Transformation of vB/wB vBDot/wBDot around the CG (output of fd ssm)
             % to vB/wB vBDot/wBDot around the reference point (input to aero)
             D2=blkdiag(D',D');
-            fd_c0([fd_outputGroup.vB fd_outputGroup.wB fd_outputGroup.vBDot fd_outputGroup.wBDot], :)=D2*fd_c0([fd_outputGroup.vB fd_outputGroup.wB fd_outputGroup.vBDot fd_outputGroup.wBDot], :);
-            fd_d0([fd_outputGroup.vB fd_outputGroup.wB fd_outputGroup.vBDot fd_outputGroup.wBDot], :)=D2*fd_d0([fd_outputGroup.vB fd_outputGroup.wB fd_outputGroup.vBDot fd_outputGroup.wBDot], :);
-            fd_dcdV([fd_outputGroup.vB fd_outputGroup.wB fd_outputGroup.vBDot fd_outputGroup.wBDot], :)=D2*fd_dcdV([fd_outputGroup.vB fd_outputGroup.wB fd_outputGroup.vBDot fd_outputGroup.wBDot], :);
-            fd_dddV([fd_outputGroup.vB fd_outputGroup.wB fd_outputGroup.vBDot fd_outputGroup.wBDot], :)=D2*fd_dddV([fd_outputGroup.vB fd_outputGroup.wB fd_outputGroup.vBDot fd_outputGroup.wBDot], :);
-            
-            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            fd_c0([fdSSM1.OutputGroup.vB fdSSM1.OutputGroup.wB fdSSM1.OutputGroup.vBDot fdSSM1.OutputGroup.wBDot], :)=D2*fd_c0([fdSSM1.OutputGroup.vB fdSSM1.OutputGroup.wB fdSSM1.OutputGroup.vBDot fdSSM1.OutputGroup.wBDot], :);
+            fd_d0([fdSSM1.OutputGroup.vB fdSSM1.OutputGroup.wB fdSSM1.OutputGroup.vBDot fdSSM1.OutputGroup.wBDot], :)=D2*fd_d0([fdSSM1.OutputGroup.vB fdSSM1.OutputGroup.wB fdSSM1.OutputGroup.vBDot fdSSM1.OutputGroup.wBDot], :);
+            fd_dcdV([fdSSM1.OutputGroup.vB fdSSM1.OutputGroup.wB fdSSM1.OutputGroup.vBDot fdSSM1.OutputGroup.wBDot], :)=D2*fd_dcdV([fdSSM1.OutputGroup.vB fdSSM1.OutputGroup.wB fdSSM1.OutputGroup.vBDot fdSSM1.OutputGroup.wBDot], :);
+            fd_dddV([fdSSM1.OutputGroup.vB fdSSM1.OutputGroup.wB fdSSM1.OutputGroup.vBDot fdSSM1.OutputGroup.wBDot], :)=D2*fd_dddV([fdSSM1.OutputGroup.vB fdSSM1.OutputGroup.wB fdSSM1.OutputGroup.vBDot fdSSM1.OutputGroup.wBDot], :);
+            obj.fdSSM.a0=fd_a0;
+            obj.fdSSM.b0=fd_b0;
+            obj.fdSSM.c0=fd_c0;
+            obj.fdSSM.d0=fd_d0;
+            obj.fdSSM.dadV=fd_dadV;
+            obj.fdSSM.dbdV=fd_dbdV;
+            obj.fdSSM.dcdV=fd_dcdV;
+            obj.fdSSM.dddV=fd_dddV;
+            obj.fdSSM.inputName=fdSSM1.InputName;
+            obj.fdSSM.outputName=fdSSM1.OutputName;
+            obj.fdSSM.stateName=fdSSM1.StateName;
+            obj.fdSSM.outputGroup=fdSSM1.OutputGroup;
+            obj.fdSSM.inputGroup=fdSSM1.InputGroup;
+          
+        end
+        
+        function obj=initSTRModel(obj,aircraft_structure)
+		
+              %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
             % prepare structural model
+            
+            if length(aircraft_structure.nodal_deflections)~=length(aircraft_structure.Mglob_lumped)
+                aircraft_structure.nodal_deflections=[];
+            end
+            
+            if ~obj.settings.restrained
+                cg=aircraft_structure.f_compute_CG';
+                cg(2)=0;
+                m=aircraft_structure.f_compute_totalMass;            
+                Inertia=aircraft_structure.f_compute_moment_of_inertia(cg);
+
+            
+                obj=obj.initFdSSM(m, cg, Inertia);
+            end
             
             obj.strModel.modalBase=aircraft_structure.modeshapes(:,obj.settings.modes);
             obj.strModel.M=diag(diag(obj.strModel.modalBase'*aircraft_structure.Mff*obj.strModel.modalBase));
@@ -200,7 +220,7 @@ classdef AeSSM
                 AllNodeLoadings=[];
                 for iModForce=1:length(obj.settings.modes)
 
-                    aircraft_structure.nodal_deflections=aircraft_structure.modeshapes(:,obj.settings.modes(iModForce));
+                    aircraft_structure.nodal_deflections=obj.strModel.modalBase(:,iModForce);
 
                     aircraft_structure=aircraft_structure.f_postprocess();
 
@@ -270,21 +290,21 @@ classdef AeSSM
             else
                 nRBMDof=6;
                 
-                obj.strSSM.a0=blkdiag(fd_a0,str_a);
-                obj.strSSM.b0=blkdiag(fd_b0,str_b);
-                obj.strSSM.c0=blkdiag(fd_c0,str_c);
-                obj.strSSM.d0=blkdiag(fd_d0,str_d);
-                obj.strSSM.dadV=blkdiag(fd_dadV,0*str_a);
-                obj.strSSM.dbdV=blkdiag(fd_dbdV,0*str_b);
-                obj.strSSM.dcdV=blkdiag(fd_dcdV,0*str_c);
-                obj.strSSM.dddV=blkdiag(fd_dddV,0*str_d);
+                obj.strSSM.a0=blkdiag(obj.fdSSM.a0,str_a);
+                obj.strSSM.b0=blkdiag(obj.fdSSM.b0,str_b);
+                obj.strSSM.c0=blkdiag(obj.fdSSM.c0,str_c);
+                obj.strSSM.d0=blkdiag(obj.fdSSM.d0,str_d);
+                obj.strSSM.dadV=blkdiag(obj.fdSSM.dadV,0*str_a);
+                obj.strSSM.dbdV=blkdiag(obj.fdSSM.dbdV,0*str_b);
+                obj.strSSM.dcdV=blkdiag(obj.fdSSM.dcdV,0*str_c);
+                obj.strSSM.dddV=blkdiag(obj.fdSSM.dddV,0*str_d);
 
 
-                obj.strSSM.stateName=[fd_stateName;str_stateName];
-                obj.strSSM.inputName=[fd_inputName;str_inputName];
-                obj.strSSM.outputName=[fd_outputName;str_outputName];
-                obj.strSSM.inputGroup=fd_inputGroup;
-                obj.strSSM.outputGroup=fd_outputGroup;
+                obj.strSSM.stateName=[obj.fdSSM.stateName;str_stateName];
+                obj.strSSM.inputName=[obj.fdSSM.inputName;str_inputName];
+                obj.strSSM.outputName=[obj.fdSSM.outputName;str_outputName];
+                obj.strSSM.inputGroup=obj.fdSSM.inputGroup;
+                obj.strSSM.outputGroup=obj.fdSSM.outputGroup;
             end
             obj.strSSM.inputGroup.modalForce=nRBMDof+(1:nModes);
             obj.strSSM.outputGroup.modeDdot=nRBMDof*4+(1:nModes);
@@ -315,6 +335,13 @@ classdef AeSSM
             uvlmUnDef=obj.uvlm;
             uvlmUnDef.Ma_corr=1;
             
+            %set control surfaces to zero before computing the coupling
+            %matrices             
+            for iCs=1:length(aircraft.control_surfaces_parents)
+                aircraft=aircraft.f_set_control_surface(aircraft.control_surfaces_parents(iCs).name,0);
+            end
+            aircraft=aircraft.compute_grid();
+            
             aircraft_structure.nodal_deflections=initDef;
             aircraft_structure=aircraft_structure.f_postprocess();
             aircraftDef=aircraft.compute_deflected_grid(aircraft_structure.f_get_deflections);
@@ -322,7 +349,7 @@ classdef AeSSM
             
             uvlmDef=obj.uvlm;
             uvlmDef.Ma_corr=1;
-            incr=aircraft.reference.b_ref/100;
+            incr=aircraft.reference.b_ref/2;
             % dBdMode (is linear function of V) describes e.g. influence of mode on b and modeDot on bDot
             % because of the linear dependency on V, only ddBBdModedV is determined and
             % later multiplied by the velocity (see TAS assembly)
@@ -340,7 +367,7 @@ classdef AeSSM
 
             bZero=flowDir*collocNvec;
             for iMode=1:nModes
-                aircraft_structure.nodal_deflections=initDef+incr*aircraft_structure.modeshapes(:,obj.settings.modes(iMode));
+                aircraft_structure.nodal_deflections=initDef+incr*obj.strModel.modalBase(:,iMode);
             %     aircraft_structure_def.nodal_deflections=initDef+incr*aircraft_structure.modeshapes(:,iMode);
                 aircraft_structure=aircraft_structure.f_postprocess();
                 aircraftDef=aircraft.compute_deflected_grid(aircraft_structure.f_get_deflections);
@@ -395,94 +422,109 @@ classdef AeSSM
             obj.tSA.outputGroup.modalForce=1:nModes;
         end
         
-        function obj=initActuatorModels(obj)
+        function obj=initActuatorModels(obj,nonlinLimitsFlag)
+          % find different cs names and store ids of cs in cell
+            for iUvlmCS=1:length(obj.uvlm.csNames)
+                currentSplit=strsplit(obj.uvlm.csNames{iUvlmCS},'_');
+                allCsNames{iUvlmCS}=currentSplit{1};
+
+            end
+            [csNames, iA, iC]=unique(allCsNames);
+            
+            if nonlinLimitsFlag
+                %for each actuator, a function handle is stored in the
+                %actuatormodel
+                j=1;
+                arr=class_nonlin_Act.empty;
+                for iCs=1:length(csNames)
+                    leftRightFlag=any(~(cellfun(@isempty,strfind(obj.uvlm.csNames(iC==iCs),'_l'))));
+                    outputId=find(startsWith(obj.uvlm.csNames,csNames{iCs}));
+                    outNames=[cellstr([repmat('dCs_',length(outputId),1) num2str([(outputId)]','%04d')]);...
+                    cellstr([repmat('dCsDot_',length(outputId),1) num2str([(outputId)]','%04d')]);...
+                    cellstr([repmat('dCsDotDot_',length(outputId),1) num2str([(outputId)]','%04d')]);];
+                    if leftRightFlag % create two actuators
+                        arr(j)=class_nonlin_Act([csNames{iCs} '_sym'], 0);
+                        j=j+1;
+                        arr(j)=class_nonlin_Act([csNames{iCs} '_asym'], 1);
+                        j=j+1;
+                    else
+                        arr(j)=class_nonlin_Act([csNames{iCs}], 0);
+                        j=j+1;
+                    end
+                end
+                obj.act.nonlin=arr;
+                % fast linear dummy actuators are integrated
+                w0 = 1000;
+                DampCoeff = 0.03;
+            else
+                %linear actuator model
+                obj.act.rateLimit=50;
+                w0 = 10;
+                DampCoeff = 0.7;
+            end
             %for each control surface pair (ailerons, spoilers, elevator,
             %movCS) 2 control paths are defined (sym and asym def)
             %for every single cs (rudder) one act path is defined
             % this function connects partial control surfaces if needed
             % fixed parameter
-            w0 = 10;
-            DampCoeff = 0.7;
-            
-
-            % find different cs names and store ids of cs in cell
-            for iUvlmCS=1:length(obj.uvlm.csNames)
-                currentSplit=strsplit(obj.uvlm.csNames{iUvlmCS},'_');
-                allCsNames{iUvlmCS}=currentSplit{1};
                 
-            end
-            [csNames, iA, iC]=unique(allCsNames);
-            
             %create dummyActuator (as long as they have all the same fixed
             %parameters)
             a = [0, 1; -w0^2, -2*DampCoeff*w0];
             b = [0; w0^2];
             c = [1, 0; 0, 1; -w0^2, -2*DampCoeff*w0];
-            d = [0; 0; w0^2];
+            d = eye(3);
             %%
-            dummyAct=ss(a,b,c,d);
+            dummyAct=ss(d);
             allAct=ss([]);
             %
             for iCs=1:length(csNames)
-                dummyAct.StateName={[csNames{iCs} '_ActState1']; [csNames{iCs} '_ActState2']};
+%                 dummyAct.StateName={[csNames{iCs} '_ActState1']; [csNames{iCs} '_ActState2']};
                 %is left and right?
                 leftRightFlag=any(~(cellfun(@isempty,strfind(obj.uvlm.csNames(iC==iCs),'_l'))));
-                outputStartId=length(allAct.outputName)/3+1;
+
                 if leftRightFlag % create two actuators
-                    symAct=dummyAct;
-                    symAct.StateName={[csNames{iCs} '_ActState1sym']; [csNames{iCs} '_ActState2sym']};
-                    symAct.InputName=[csNames{iCs} '_sym'];
-                    %add left outputs to symAct
-                    symAct=series(symAct,ss([eye(3);-eye(3)]));
-                    symAct.OutputName={['dCs_' num2str([(outputStartId)]','%04d')]; ['dCsDot_' num2str([(outputStartId)]','%04d')]; ['dCsDotDot_' num2str([(outputStartId)]','%04d')]; ['dCs_' num2str([(outputStartId+1)]','%04d')]; ['dCsDot_' num2str([(outputStartId+1)]','%04d')]; ['dCsDotDot_' num2str([(outputStartId+1)]','%04d')]};
-                    
-                    aSymAct=dummyAct;
-                    aSymAct.StateName={[csNames{iCs} '_ActState1asym']; [csNames{iCs} '_ActState2asym']};
-                    aSymAct.InputName=[csNames{iCs} '_asym'];
-                    %add left outputs to aSymAct
-                    aSymAct=series(aSymAct,ss([eye(3);eye(3)]));
-                    aSymAct.OutputName={['dCs_' num2str([(outputStartId)]','%04d')]; ['dCsDot_' num2str([(outputStartId)]','%04d')]; ['dCsDotDot_' num2str([(outputStartId)]','%04d')]; ['dCs_' num2str([(outputStartId+1)]','%04d')]; ['dCsDot_' num2str([(outputStartId+1)]','%04d')]; ['dCsDotDot_' num2str([(outputStartId+1)]','%04d')]};
-                    %add outputs for parts
-                    if length(obj.uvlm.csNames(iC==iCs))==4
-                        disp('not implemented yet')
-                        break
-                    elseif length(obj.uvlm.csNames(iC==iCs))==6
-                        disp('not implemented yet')
-                        break
-                    end
+                    outputIds=find(startsWith(obj.uvlm.csNames,csNames{iCs}));
+
+                    symAct=series(dummyAct, ss(kron(eye(3),kron(ones(length(outputIds)/2,1),[1; -1] ))));
+%                     symAct.StateName={[csNames{iCs} '_ActState1sym']; [csNames{iCs} '_ActState2sym']};
+                    symAct.InputName={[csNames{iCs} '_sym'] [csNames{iCs} 'Dot_sym'] [csNames{iCs} 'DotDot_sym']};
+
+                    symAct.OutputName=[ cellstr([repmat('dCs_',length(outputIds),1) num2str([(outputIds)]','%04d')]);...
+                                        cellstr([repmat('dCsDot_',length(outputIds),1) num2str([(outputIds)]','%04d')]);...
+                                        cellstr([repmat('dCsDotDot_',length(outputIds),1) num2str([(outputIds)]','%04d')]);];
+
+                    aSymAct=series(dummyAct, ss(kron(eye(3),kron(ones(length(outputIds)/2,1),[1; 1] ))));
+%                     aSymAct.StateName={[csNames{iCs} '_ActState1asym']; [csNames{iCs} '_ActState2asym']};
                     %name in and outputs
+                    aSymAct.InputName={[csNames{iCs} '_asym'] [csNames{iCs} 'Dot_asym'] [csNames{iCs} 'DotDot_asym']};
+                    aSymAct.OutputName= symAct.OutputName;
                     %append to allAct
                     allAct=append(allAct,parallel(symAct,aSymAct,'name'));
-                    
+
                 else %
+                    outputId=find(startsWith(obj.uvlm.csNames,csNames{iCs}));
                     %only add ouputs
-                    oneAct=dummyAct;
+                    oneAct=series(dummyAct, ss(kron(eye(3),ones(length(outputId),1))));
                     %name in and ouputs
-                    oneAct.InputName=[csNames{iCs}];
-                    oneAct.OutputName={['dCs_' num2str([(outputStartId)]','%04d')]; ['dCsDot_' num2str([(outputStartId)]','%04d')]; ['dCsDotDot_' num2str([(outputStartId)]','%04d')];};
-                    %add outputs for parts
-                    if length(obj.uvlm.csNames(iC==iCs))==2
-                        disp('not implemented yet')
-                        break
-                    elseif length(obj.uvlm.csNames(iC==iCs))==3
-                        disp('not implemented yet')
-                        break
-                    end
-                    
+                    oneAct.InputName={[csNames{iCs} ''] [csNames{iCs} 'Dot'] [csNames{iCs} 'DotDot']};
+
+                    oneAct.OutputName=[ cellstr([repmat('dCs_',length(outputId),1) num2str([(outputId)]','%04d')]);...
+                                        cellstr([repmat('dCsDot_',length(outputId),1) num2str([(outputId)]','%04d')]);...
+                                        cellstr([repmat('dCsDotDot_',length(outputId),1) num2str([(outputId)]','%04d')]);];
+
                     %append to allAct
                     allAct=append(allAct,oneAct);
                 end
             end
-            
-            
-            % store rate limits for each cs
-            
-            allAct.OutputGroup.dCs=[1:3:size(allAct,1)];
-            allAct.OutputGroup.dCsDot=[2:3:size(allAct,1)];
-            allAct.OutputGroup.dCsDotDot=[3:3:size(allAct,1)];
-            allAct.InputGroup.controlCommand=[1:size(allAct,2)];
+            allAct.OutputGroup.dCs=find(startsWith(allAct.OutputName,'dCs_'))';
+            allAct.OutputGroup.dCsDot=find(startsWith(allAct.OutputName,'dCsDot_'))';
+            allAct.OutputGroup.dCsDotDot=find(startsWith(allAct.OutputName,'dCsDotDot_'))';
+            allAct.InputGroup.controlCommand=[1:3:size(allAct,2)];
+            allAct.InputGroup.controlCommandDot=[2:3:size(allAct,2)];
+            allAct.InputGroup.controlCommandDotDot=[3:3:size(allAct,2)];
             obj.act.SSM=allAct;
-            obj.act.rateLimit=50;
+
         end
         
         function obj=initSensorModels(obj, aircraft)
@@ -987,11 +1029,22 @@ classdef AeSSM
             aerSSM.InputGroup=obj.tUvlmSSM.inputGroup;
             aerSSM.OutputName=obj.tUvlmSSM.outputName;
             aerSSM.OutputGroup=obj.tUvlmSSM.outputGroup;
+            if obj.settings.csMonitor
+                %monitoring def/rate by adding outputs to aerSSM
+                csMonitor=ss(eye(length([aerSSM.InputGroup.dCs aerSSM.InputGroup.dCsDot])));
+                csMonitor.InputName=aerSSM.InputName([aerSSM.InputGroup.dCs aerSSM.InputGroup.dCsDot]);
+                csMonitor.OutputName=strcat(aerSSM.InputName([aerSSM.InputGroup.dCs aerSSM.InputGroup.dCsDot]),'m');
+                csMonitor.OutputGroup.dCsMonitor=1:length(aerSSM.InputGroup.dCs);
+                csMonitor.OutputGroup.dCsDotMonitor=length(aerSSM.InputGroup.dCs)+1:length([aerSSM.InputGroup.dCs aerSSM.InputGroup.dCsDot]);
+                aerSSM=parallel(aerSSM,csMonitor,'name');
+            end
 
             %add actuators to aerSSM
+            
             if ~isempty(obj.act.SSM)
                 aerSSM=seriesPreserve(obj.act.SSM,aerSSM,{'dCs','dCsDot','dCsDotDot'});
             end
+
             %
             structSSM=ss(   obj.strSSM.a0+Vlin*obj.strSSM.dadV,...
                             obj.strSSM.b0+Vlin*obj.strSSM.dbdV,...
@@ -1005,82 +1058,77 @@ classdef AeSSM
             structSSM.OutputGroup=obj.strSSM.outputGroup;
 
             obj.linSSM=connect(aerSSM,structSSM,[aerSSM.InputName],[aerSSM.outputName; structSSM.outputName]);
-            %merge gust zones if necessary
-            if obj.settings.gustInputs
-                nGz= size(obj.uvlm.gustZones,1);
-                combIn=ss(blkdiag(repmat(eye(3),nGz,1),repmat(eye(3),nGz,1)));
-                combIn.InputName={'vGx';'vGy';'vGz';'vGxDot';'vGyDot';'vGzDot'};    
-                combIn.OutputName=obj.linSSM.InputName([obj.linSSM.InputGroup.vG obj.linSSM.InputGroup.vGDot]);
-                combIn.OutputGroup.vG=1:3*nGz;
-                combIn.OutputGroup.vGDot=3*nGz+1:6*nGz;
-                combIn.InputGroup.vG=1:3;
-                combIn.InputGroup.vGDot=4:6;
-                obj.linSSM=seriesPreserve(combIn,obj.linSSM,{'vG'; 'vGDot'});
-            end
-            %add controller if existent
-            
-            if ~isempty(obj.ctr)
-            if ~isempty(obj.ctr.contSSM)
-                ctrSSM=obj.ctr.contSSM;
-                
-                % add other gust inputs (x y)
-%                 ctrSSM=append(ss([],zeros(0,2),[],zeros(0,2)),ctrSSM);
-%                 ctrSSM.inputName=obj.linSSM.InputName(obj.linSSM.InputGroup.vG);
-                % add other control outputs (the control commands which are not used by the ff controller
-                nCCall=length(obj.linSSM.InputName(obj.linSSM.InputGroup.controlCommand));
-                nCCctr=length(ctrSSM.OutputName);
-                ctrSSM=append(ctrSSM,ss([],[],zeros(nCCall-nCCctr,0),[]));
-                % find missing outputnames
-                cell1=obj.linSSM.InputName(obj.linSSM.InputGroup.controlCommand);
-                cell2= ctrSSM.OutputName;
-                [n,m]=size(cell1);
-                [~,idx]=ismember(cell1(:),cell2(:));
-                [ii,~]=ind2sub([n m],idx);
-                output=ii(1:n)';
-                ctrSSM.OutputName(nCCctr+1:end)=[ obj.linSSM.InputName(obj.linSSM.InputGroup.controlCommand(output==0))];
-                
-                % resort outputs 
-                cell1=obj.linSSM.InputName(obj.linSSM.InputGroup.controlCommand);
-                cell2= ctrSSM.OutputName;
-                [n,m]=size(cell1);
-                [~,idx]=ismember(cell1(:),cell2(:));
-                [ii,~]=ind2sub([n m],idx);
-                output=ii(1:n)';
-                ctrSSM=ctrSSM(output,:);
-                ctrSSM.outputGroup.controlCommand=1:nCCall;
-                
-                %add additional inputs for control commands
-                a=ctrSSM.a;
-                b=[ctrSSM.b zeros(order(ctrSSM),size(ctrSSM,1))];
-                c=[ctrSSM.c];
-                d=[ctrSSM.d eye(size(ctrSSM,1))];
+                 
+           
+            %add controller if existent and linear actuator model is used
+            if all([~obj.settings.nonlinActLimits, ~isempty(obj.ctr)])
+                if ~isempty(obj.ctr.contSSM)
+                    ctrSSM=obj.ctr.contSSM;
 
-                ffSSM=ss(a,b,c,d);
-                ffSSM.InputName=[ctrSSM.InputName; obj.linSSM.InputName(obj.linSSM.InputGroup.controlCommand)];
-                ffSSM.InputGroup.controlCommand=2:1+nCCall;
+                    % add other gust inputs (x y)
+    %                 ctrSSM=append(ss([],zeros(0,2),[],zeros(0,2)),ctrSSM);
+    %                 ctrSSM.inputName=obj.linSSM.InputName(obj.linSSM.InputGroup.vG);
+                    % add other control outputs (the control commands which are not used by the ff controller
+                    nCCall=length(obj.linSSM.InputName(obj.linSSM.InputGroup.controlCommand));
+                    nCCctr=length(ctrSSM.OutputName);
+                    ctrSSM=append(ctrSSM,ss([],[],zeros(nCCall-nCCctr,0),[]));
+                    % find missing outputnames
+                    cell1=obj.linSSM.InputName(obj.linSSM.InputGroup.controlCommand);
+                    cell2= ctrSSM.OutputName;
+                    [n,m]=size(cell1);
+                    [~,idx]=ismember(cell1(:),cell2(:));
+                    [ii,~]=ind2sub([n m],idx);
+                    output=ii(1:n)';
+                    ctrSSM.OutputName(nCCctr+1:end)=[ obj.linSSM.InputName(obj.linSSM.InputGroup.controlCommand(output==0))];
 
-                ffSSM.StateName=ctrSSM.StateName;
-                ffSSM.OutputName=[ ctrSSM.OutputName; ];
-                ffSSM.outputGroup.controlCommand=1:nCCall;
-                %add vgdotfeedthrough
-                vGft=ss(eye(6));
-                vGft.InputName=[ obj.linSSM.InputName(obj.linSSM.InputGroup.vG); obj.linSSM.InputName(obj.linSSM.InputGroup.vGDot)];
-                vGft.InputGroup.vG=1:3;
-                vGft.InputGroup.vGDot=4:6;
-                vGft.OutputName= [ obj.linSSM.InputName(obj.linSSM.InputGroup.vG); obj.linSSM.InputName(obj.linSSM.InputGroup.vGDot)];
-                vGft.OutputGroup.vG=1:3;
-                vGft.OutputGroup.vGDot=4:6;
-                ffSSM=append(vGft,ffSSM);
-                % add outputdelay to vGust output
-                ffSSM.OutputDelay([ffSSM.OutputGroup.vG ffSSM.OutputGroup.vGDot])=abs(obj.settings.aoaProbePos/Vlin);
-                ffSSM.OutputDelay([ffSSM.OutputGroup.vG ffSSM.OutputGroup.vGDot])=abs(30/Vlin);
-                
-             
-                %connect to linSSM with seriesPreserve
-                obj.linSSM=seriesPreserve(ffSSM,obj.linSSM,{'vG','vGDot','controlCommand'});
-                
-            end
-            end
+                    % resort outputs 
+                    cell1=obj.linSSM.InputName(obj.linSSM.InputGroup.controlCommand);
+                    cell2= ctrSSM.OutputName;
+                    [n,m]=size(cell1);
+                    [~,idx]=ismember(cell1(:),cell2(:));
+                    [ii,~]=ind2sub([n m],idx);
+                    output=ii(1:n)';
+                    ctrSSM=ctrSSM(output,:);
+                    ctrSSM.outputGroup.controlCommand=1:nCCall;
+
+                    %add additional inputs for control commands
+                    a=ctrSSM.a;
+                    b=[ctrSSM.b zeros(order(ctrSSM),size(ctrSSM,1))];
+                    c=[ctrSSM.c];
+                    d=[ctrSSM.d eye(size(ctrSSM,1))];
+
+                    ffSSM=ss(a,b,c,d);
+                    ffSSM.InputName=[ctrSSM.InputName; obj.linSSM.InputName(obj.linSSM.InputGroup.controlCommand)];
+                    ffSSM.InputGroup.controlCommand=2:1+nCCall;
+
+                    ffSSM.StateName=ctrSSM.StateName;
+                    ffSSM.OutputName=[ ctrSSM.OutputName; ];
+                    ffSSM.outputGroup.controlCommand=1:nCCall;
+                    %add vg+vgdotfeedthrough and inputdelays on the new vg
+                    %zones (one additional for aoaprobesignal)
+                    nGz=length(obj.linSSM.InputGroup.vG)/3;
+                    vGft=ss(eye((nGz)*3*2));
+                    vGft.InputName=[obj.linSSM.InputName(obj.linSSM.InputGroup.vG); obj.linSSM.InputName(obj.linSSM.InputGroup.vGDot)];
+                    vGft.InputGroup.vG=1:(nGz)*3;
+                    vGft.InputGroup.vGDot=(nGz)*3+1:(nGz)*6;
+                    vGft.OutputName= [obj.linSSM.InputName(obj.linSSM.InputGroup.vG); obj.linSSM.InputName(obj.linSSM.InputGroup.vGDot)];
+                    vGft.OutputGroup.vG=1:(nGz)*3;
+                    vGft.OutputGroup.vGDot=(nGz)*3+1:(nGz)*6;
+                    ffSSM=append(vGft,ffSSM);
+                    % add outputdelay to vGust output
+                    % calculate totalTimeDifference between gust outputs and
+                    % controller outputs
+                    
+                    %move delays on ffSSM inputs so that no internal delays
+                    %occur in the resulting obj.linSSM
+                    ffSSM.InputDelay([ffSSM.InputGroup.vG ffSSM.InputGroup.vGDot])=abs(obj.settings.aoaProbePos/Vlin)+obj.linSSM.InputDelay([obj.linSSM.InputGroup.vG obj.linSSM.InputGroup.vGDot]);
+
+                    obj.linSSM.InputDelay([obj.linSSM.InputGroup.vG obj.linSSM.InputGroup.vGDot])=obj.linSSM.InputDelay([obj.linSSM.InputGroup.vG obj.linSSM.InputGroup.vGDot])*0;
+
+                    %connect to linSSM with seriesPreserve
+                    obj.linSSM=seriesPreserve(ffSSM,obj.linSSM,{'vG','vGDot','controlCommand'});
+                end
+            end 
         end %linearize
         
         function obj=getLinSSMonlyRBMAero(obj, Vlin)
@@ -1090,6 +1138,7 @@ classdef AeSSM
                         full(obj.tUvlmSSM.d0+Vlin*obj.tUvlmSSM.dddV+Vlin^2*obj.tUvlmSSM.dddV2+Vlin^3*obj.tUvlmSSM.dddV3+Vlin^4*obj.tUvlmSSM.dddV4+Vlin^5*obj.tUvlmSSM.dddV5)...
                         );
             aerSSM.InputName=obj.tUvlmSSM.inputName;
+            aerSSM.InputDelay=obj.tUvlmSSM.inputDelayFV/Vlin;
             aerSSM.InputGroup=obj.tUvlmSSM.inputGroup;
             aerSSM.OutputName=obj.tUvlmSSM.outputName;
             aerSSM.OutputGroup=obj.tUvlmSSM.outputGroup;
@@ -1244,6 +1293,21 @@ classdef AeSSM
             %remove linSSM
             obj.linSSM=[];
             
+        end
+        
+        function obj=updateFdCgAndMass(obj,mass,cg, Inertia)
+            %reinitialize FDSSM
+            obj=obj.initFdSSM(mass,cg, Inertia);
+            % modify strSSM
+            obj.strSSM.a0(1:12, 1:12)=obj.fdSSM.a0;
+            obj.strSSM.b0(1:12, 1:6)=obj.fdSSM.b0;
+            obj.strSSM.c0(1:24, 1:12)=obj.fdSSM.c0;
+            obj.strSSM.d0(1:24, 1:6)=obj.fdSSM.d0;
+            obj.strSSM.dadV(1:12, 1:12)=obj.fdSSM.dadV;
+            obj.strSSM.dbdV(1:12, 1:6)=obj.fdSSM.dbdV;
+            obj.strSSM.dcdV(1:24, 1:12)=obj.fdSSM.dcdV;
+            obj.strSSM.dddV(1:24, 1:6)=obj.fdSSM.dddV;
+
         end
         
         function obj=runFlutterAnalysis(obj,VloopVec,plotFlag)
@@ -1437,60 +1501,135 @@ classdef AeSSM
             else
                 outputs={'rI','loads','mode'};
             end
-            if ~isempty(obj.ctr)
+            if obj.settings.csMonitor
+                outputs=[outputs 'dCsMonitor' 'dCsDotMonitor'];
+            end
+            if and(~isempty(obj.ctr), ~obj.settings.nonlinActLimits)
                 if ~isempty(obj.ctr.contSSM)
-                    inputs={'vGz','vGzDot','aoaProbeIn'};            
+                    inputs={'vG','vGDot','aoaProbeIn'};            
                 else
-                    inputs={'vGz','vGzDot'};     
+                    inputs={'vG','vGDot'};     
                 end
-            else
-                inputs={'vGz','vGzDot'};                
-            end
-            simSSM=obj.linSSM(outputs,inputs);
-            %connect vGz to aoaProbeIn when present
-            if ~isempty(obj.ctr)
-                sys=ss([1 0; 0 1; 1 0]);
-                sys.inputName={'vGz','vGzDot'};
-                sys.outputName={'vGz','vGzDot','aoaProbeIn'}; 
+            elseif  and(~isempty(obj.ctr), obj.settings.nonlinActLimits)
+                inputs={'vG','vGDot','controlCommand', 'controlCommandDot', 'controlCommandDotDot'};  
                 
-                simSSM=series(sys,simSSM);
+            else
+                inputs={'vG','vGDot'};                
             end
+            
+            simSSM=obj.linSSM(outputs,inputs);
+            % only keep vertical gust velocity inputs
+            allIn=1:length(simSSM.inputName);
+            rmIn=[simSSM.InputGroup.vG(1:3:end) simSSM.InputGroup.vG(2:3:end) simSSM.InputGroup.vGDot(1:3:end) simSSM.InputGroup.vGDot(2:3:end)];
+            keepIn=setdiff(allIn, rmIn);
+            simSSM=simSSM(:,keepIn);
             
             gradientVec=linspace(9,107,nGustLengths); %shortest to longest gust
             timeStep=9/V/25; %s 25 time steps for shortest gust
-            totalTime=107/V*3+0.01; %s
+            totalTime=107/V*10+0.01; %s
             timeVec=0:timeStep:totalTime;
             gustStartTime=timeVec(min(find(timeVec>0.01))); %s
             allLoads=zeros(length(timeVec),size(simSSM,1),length(gradientVec));
             %Reference Gust Velocity (see CS25)
             h=gustState.h;
-%             if h<=4572
-%                Uref= 17.07 - (17.07 - 13.41)*h/4572;
-%             elseif and(h>4572,h<=18288)
-%                Uref=13.41 -(13.41 - 6.36)*(h-4572)/(18288-4572);
-%             elseif h>18288
-%                Uref=6.36;
-%             end
             
-            DynPress_Dive = 26000; Mach_Dive = 0.84; % to be defined based on OAD
+            DynPress_Dive = 26000; Mach_Dive = gustState.M_D; % to be defined based on OAD
             
             [Uds_grid, U_sig] = ComputeGustProperties_EASA_CS25(Fg, h, gradientVec, V, DynPress_Dive, Mach_Dive); % !!!Altitude is in meters!!! % a/c speed in m/s TAS!!!
             
+            
+            % prepare gust profiles
+            uGust=zeros(length(timeVec),length(gradientVec));
+            uGustDot=zeros(length(timeVec),length(gradientVec));
+            
             for iLength=1:length(gradientVec)
-                    % definition of 1-cosine gust
-                    gustGradient  = gradientVec(iLength); %m
-                    gustAmplitude = Uds_grid(iLength);    %m/s 
-                    tGust=2*gustGradient/V;
-                    omegaGust=2*pi/tGust;
-                    timeVecGust=0:timeStep:tGust;
-                    uGust=zeros(1,length(timeVec));
-                    uGustDot=zeros(1,length(timeVec));
-                    uGust(find(timeVec==gustStartTime):find(timeVec==gustStartTime)+length(timeVecGust)-1)=gustAmplitude/2*(1-cos(omegaGust*timeVecGust));
-                    uGustDot(find(timeVec==gustStartTime):find(timeVec==gustStartTime)+length(timeVecGust)-1)=gustAmplitude/2*omegaGust*sin(omegaGust*timeVecGust);
-                    % gust loads simulation
-                    u=[uGust; uGustDot]';
-                    allData(:,:,iLength)=lsim(simSSM,u,timeVec);
-                    allInputs(:,:,iLength)=u;
+                gustGradient  = gradientVec(iLength); %m
+                gustAmplitude = Uds_grid(iLength);    %m/s 
+                tGust=2*gustGradient/V;
+                omegaGust=2*pi/tGust;
+                timeVecGust=(0:timeStep:tGust)';
+                uGust(find(timeVec==gustStartTime):find(timeVec==gustStartTime)+length(timeVecGust)-1,iLength)=gustAmplitude/2*(1-cos(omegaGust*timeVecGust));
+                uGustDot(find(timeVec==gustStartTime):find(timeVec==gustStartTime)+length(timeVecGust)-1,iLength)=gustAmplitude/2*omegaGust*sin(omegaGust*timeVecGust);
+            end
+            
+            % if controller is present and nonlinactlimits, simulate the
+            % controller and then the nonlinear actuator due to the aoa
+            % probe gust signal
+            if and(~isempty(obj.ctr),obj.settings.nonlinActLimits)
+                dCsCommand=zeros(size(uGust,1),length(obj.ctr.contSSM.OutputName),length(gradientVec));
+
+                for iLength=1:length(gradientVec)
+                    %controller command simulation
+                    dCsCommand(:,:,iLength)=lsim(obj.ctr.contSSM,uGust(:,iLength),timeVec);
+                end
+
+                % delay the gust signal relative to the dCsCommand
+                tStartIdx=ceil(abs(obj.settings.aoaProbePos/V)/timeStep);
+                uGustDelayed=uGust*0;
+                uGustDotDelayed=uGustDot*0;
+                uGustDelayed(tStartIdx:end,:,:)=uGust(1:end-tStartIdx+1,:,:);
+                uGustDotDelayed(tStartIdx:end,:,:)=uGustDot(1:end-tStartIdx+1,:,:);
+               
+                %nonlin act simulation
+                allOutIdx=[];
+                uCsCommand=zeros(length(timeVec),length(simSSM.InputName([simSSM.InputGroup.controlCommand])),length(gradientVec)*2);
+                uCsCommandDot=uCsCommand;
+                uCsCommandDotDot=uCsCommand;
+                for iGlaSurf=1:length(gustState.glaSurf)
+                        actIdx=find(cellfun(@(x)strcmp(x, [gustState.glaSurf{iGlaSurf} '_sym']),{obj.act.nonlin.inputName}));
+                        obj.act.nonlin(actIdx).lb=gustState.glaLB(iGlaSurf);
+                        obj.act.nonlin(actIdx).ub=gustState.glaUB(iGlaSurf);
+                        outIdx= strcmp(obj.act.nonlin(actIdx).outputName,simSSM.InputName([simSSM.InputGroup.controlCommand]));
+                        allOutIdx=[allOutIdx; find(outIdx)+[0 1 2]'*length(simSSM.InputName([simSSM.InputGroup.controlCommand]))];
+                        for iLength=1:length(gradientVec)
+                            raw=obj.act.nonlin(actIdx).simulate(dCsCommand(:,iGlaSurf,iLength)',timeVec)';
+                            uCsCommand(:,outIdx,iLength)=raw(:,1);
+                            uCsCommandDot(:,outIdx,iLength)=raw(:,3);
+                            uCsCommandDotDot(:,outIdx,iLength)=raw(:,5);
+                            %negative gust velocity -> negative signal at
+                            %actuator
+                            raw=obj.act.nonlin(actIdx).simulate(-dCsCommand(:,iGlaSurf,iLength)',timeVec)';
+                            uCsCommand(:,outIdx,length(gradientVec)+iLength)=raw(:,1);
+                            uCsCommandDot(:,outIdx,length(gradientVec)+iLength)=raw(:,3);
+                            uCsCommandDotDot(:,outIdx,length(gradientVec)+iLength)=raw(:,5);
+                        end
+                end
+                
+                uGust=reshape([uGustDelayed -uGustDelayed],length(timeVec),1,length(gradientVec)*2);
+                uGustDot=reshape([uGustDotDelayed -uGustDotDelayed],length(timeVec),1,length(gradientVec)*2);
+                
+            else
+                uGust=reshape(uGust,length(timeVec),1,length(gradientVec));
+                uGustDot=reshape(uGustDot,length(timeVec),1,length(gradientVec));
+            end
+            % % % delay signal of uGust for gust Zones
+            nGz=length(simSSM.InputGroup.vG);
+            delayVec=simSSM.InputDelay(1:nGz);
+            uGustZones=zeros(size(uGust,1), nGz, size(uGust,3));
+            uGustDotZones=zeros(size(uGust,1), nGz, size(uGust,3));
+            for iGz=1:nGz
+                startTimeIdx=find(timeVec-delayVec(iGz)>=0,1);
+                uGustZones(startTimeIdx:end,iGz,:)=uGust(1:end-startTimeIdx+1,:);
+                uGustDotZones(startTimeIdx:end,iGz,:)=uGustDot(1:end-startTimeIdx+1,:);
+            end
+            simSSM.InputDelay(1:2*nGz)=0*simSSM.InputDelay(1:2*nGz);
+            % % % build all Inputarray with commands if required
+            if and(~isempty(obj.ctr),obj.settings.nonlinActLimits)
+                uTotal=cat(2,uGustZones,uGustDotZones,uCsCommand, uCsCommandDot, uCsCommandDotDot);
+                idxToSim=[1:nGz*2 allOutIdx'+(nGz*2)];
+            else
+                uTotal=cat(2,uGustZones,uGustDotZones);
+                idxToSim=[1:nGz*2];
+            end
+            % % % simulate gusts
+            %identify reuqired inputs to simulate
+            %identify start time
+            allData=zeros(length(timeVec),size(simSSM,1),size(uTotal,3));
+            allInputs=zeros(length(timeVec),length(idxToSim),size(uTotal,3));
+            for iSim=1:size(uTotal,3)
+                    startTimeStep=find(any(squeeze(uTotal(:,idxToSim,iSim))'),1);
+                    allData(startTimeStep:end,:,iSim)=lsim(simSSM(:,idxToSim),uTotal(startTimeStep:end,idxToSim,iSim),timeVec(1:end-startTimeStep+1));
+                    allInputs(:,:,iSim)=uTotal(:,idxToSim,iSim);
             end
             if ~obj.settings.restrained
                 obj.gustData.r=allData(:,simSSM.OutputGroup.rI,:);
@@ -1500,6 +1639,10 @@ classdef AeSSM
             obj.gustData.modes=allData(:,simSSM.OutputGroup.mode,:);
             obj.gustData.lengthVec=gradientVec;
             obj.gustData.timeVec=timeVec;
+            if obj.settings.csMonitor
+                obj.gustData.csDef=allData(:,simSSM.OutputGroup.dCsMonitor,:);
+                obj.gustData.csRate=allData(:,simSSM.OutputGroup.dCsDotMonitor,:);
+            end
         end
 
         function obj=runGustAnalysisClosedLoop(obj,gustState,Fg,nGustLengths,nomLoads)
@@ -1980,135 +2123,7 @@ classdef AeSSM
             obj.gustData.contTurb.timeVec=tVec;
         end
         
-        function obj=optimFFController(obj, state,Fg,nGustLengths, nomLoads)
-			% get required variables
-            V=state.aerodynamic_state.V_A;
-            %time step is determined as in discretegust:
-            Ts=9/V/25; %s 25 time steps for shortest gust
-            % clear ffcontroller
-            obj.ctr.contSSM=[];
-            obj.linSSM=[];
-            %regen linSSM without ctr
-            if isempty(obj.linSSM)
-                if isempty(obj.tUvlmSSM)
-                    obj=obj.generateTuvlm();
-                end
-                obj=obj.getLinSSM(V);
-            elseif obj.linV~=V
-                obj=obj.getLinSSM(V);
-            end
-            %get controlled cs
-            nCs=length(state.glaSurf);
-            outputName=cell(nCs,1);
-            for iCs=1:nCs
-                outputName{iCs}=[state.glaSurf{iCs} '_sym'];
-            end
-            % init ctr class
-            obj.ctr=class_FF_Controller(outputName);
-            N=obj.ctr.order;
-            % prepare struct with min max def and rates
-			GLAS_ActuatorModel.UB=state.glaUB;
-            GLAS_ActuatorModel.LB=state.glaLB;
-            GLAS_ActuatorModel.maxRate=obj.act.rateLimit;
-            % coefficients for loads required for objective function (i.e.
-            % what mass benefit can be achived by a load reduction of this
-            % station)
-            MassCoeffBend = [linspace(0, 1, (length(obj.settings.strLoadStations)-1)/2), 0, linspace(1, 0, (length(obj.settings.strLoadStations)-1)/2)];
-            %Static Bending from nominal loads ; This is required so that
-            %the optimizer knows if it is better to reduce or to maximize
-            %the dynamic load at a certain station  
-            StaticBending = nomLoads(4:6:end);            
-            
-            %% generate time responses (gust to load)
-            obj=obj.runContTurbAnalysis(state,1);
-            %% generate models for time responses (control to load)
-            %scp model
-            scp=series(obj.ctr.delay, obj.ctr.highPass);
-            %von karman filter
-            VonKarman_Filter = sqrt(762/V)*tf([.3398*(762/V)^2 2.7478*(762/V) 1],[.1539*(762/V)^3 1.9752*(762/V)^2 2.9958*(762/V) 1]);
-            %% uSCP  gen
-            randomnumber1=obj.settings.contTurbSignal.rand1;
-            randomnumber2=obj.settings.contTurbSignal.rand2;
-            DynPress_Dive = 25961; Mach_Dive = 0.85; % to be defined based on OAD
-            gradientVec=linspace(9,107,nGustLengths);
-            
-            [Uds_grid, U_sig] = ComputeGustProperties_EASA_CS25(Fg, state.h, gradientVec, V, DynPress_Dive, Mach_Dive); % !!!Altitude is in meters!!! % a/c speed in m/s TAS!!!
-            
-            %coherence between SCP and PCP
-            QuadraticCoherence = 0.75; % 1 is perfect coherence; 0 is no coherence; for first wing bending mode around 1 Hz, 0.75 is a realistic choice, see PhD Wildschek
-
-            whitenoise1 = U_sig/sqrt(Ts)  *  (1/rms(randomnumber1)*randomnumber1);
-            u = whitenoise1;  % vertical gust speed in m/s 
-            u_known = sqrt(QuadraticCoherence)*whitenoise1;
-
-            whitenoise2 = U_sig/sqrt(Ts)  *  (1/rms(randomnumber2)*randomnumber2);
-            u_unknown = sqrt(1-QuadraticCoherence)*whitenoise2;  % vertical gust speed in m/s 
-
-            u_PCP = u_known+u_unknown;
-            u_SCP = u;
-            %% contTurb  sim
-            dataContTurb=zeros(length(obj.gustData.contTurb.timeVec),length(obj.linSSM.OutputGroup.loads),nCs);
-            for iCs=1:nCs
-                dataContTurb(:,:,iCs)=lsim(obj.linSSM({'loads'},outputName(iCs))*scp*VonKarman_Filter,u_SCP,obj.gustData.contTurb.timeVec);
-            end
-            %discrete gust inputs
-            timeVec=obj.gustData.contTurb.timeVec;
-            allData_gust=zeros(length(obj.gustData.contTurb.timeVec),nGustLengths);
-            for iLength=1:length(gradientVec)
-                % definition of 1-cosine gust
-                gustGradient  = gradientVec(iLength); %m
-                gustAmplitude = Uds_grid(iLength);    %m/s 
-                tGust=2*gustGradient/V;
-                omegaGust=2*pi/tGust;
-                timeVecGust=0:Ts:tGust;
-                uGust=zeros(1,length(timeVec));
-                uGust(1:length(timeVecGust))=gustAmplitude/2*(1-cos(omegaGust*timeVecGust));
-                % sim
-                allData_gust(:,iLength)=lsim(scp,uGust,timeVec);
-            end
-            
-            
-            
-            
-            
-            
-            
-            %% merge time responses 
-            % include time shift for gust to load responses (aoaprobe)
-            % TODO: check effect on result if this matters or not...
-            delay=abs(obj.settings.aoaProbePos/V);
-            delay=abs(30/V);
-            [~,delayIdx]=min(abs(timeVec-delay));
-            dataContTurb(delayIdx:end,:,nCs+1)=obj.gustData.contTurb.loads(1:end-delayIdx+1,:);
-			%% optim
-            h0=0*ones(1,nCs*N);
-%             h0=linspace(1,2,nCs*N);
-            %% test
-%             GLA_Costfun(h0, N, MassCoeffBend, StaticBending, dataContTurb)
-%             GLA_CostfunOld(h0, N, MassCoeffBend, StaticBending, dataContTurb)
-%             GLA_Constraintsfun(h0,N,Ts,GLAS_ActuatorModel,allData_gust);
-            %%
-			display('*******   Optimization runnning for optimresults_GLA...');
-            options =optimoptions('fmincon','algorithm','sqp-legacy','Display','iter-detailed','MaxFunctionEvaluations',10000, 'ConstraintTolerance',1e-4);
-            
-            x = fmincon(...
-            @(h)GLA_Costfun(h, N, MassCoeffBend, StaticBending, dataContTurb), ...
-            ...
-            h0,[],[],[],[],[],[],...
-            ...
-            @(h)GLA_Constraintsfun(h,N,Ts,GLAS_ActuatorModel,allData_gust(:,:)),...
-            ...
-            options);
-            display('*-*-*-*-*-*-*-* Optimization process completed !! *-*-*-*-*-*-*-*');
-			%% set controller coefficients
-			% set
-			obj.ctr.coeff=x;
-			% gen ssm
-			obj.ctr=obj.ctr.genSSM(Ts);
-            obj.linSSM=[];
-			
-            
-        end
+  
         function obj=plotActDeflectionAndRates(obj, inputsignal,timevec)
             commandData=obj.ctr.getCommands(inputsignal,timevec);
             for iSim=1:size(inputsignal,2)

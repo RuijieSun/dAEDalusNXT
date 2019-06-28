@@ -34,12 +34,12 @@ DynPress = rho*VTAS^2/2;
        
 if Altitude < 15000*0.3048
     U_ref = (56-(56-44)/4572 * Altitude)*0.3048;                              % U_ref in m/s EAS
-elseif and(h>4572,h<=18288) 
+elseif and(Altitude>4572,Altitude<=18288) 
     % [1996] version of CS 25.341
     %U_ref = (44-(44-26)/(15240-4572) * (Altitude-4572))*0.3048;              % U_ref in m/s EAS
     % [2010] version of CS 25.341
     U_ref = (44-(44-20.86)/(18288-4572) * (Altitude-4572))*0.3048;            % U_ref in m/s EAS  
-elseif h>18288
+elseif Altitude>18288
     Uref = 6.36;
 end
         
