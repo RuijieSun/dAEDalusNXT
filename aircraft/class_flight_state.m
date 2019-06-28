@@ -11,7 +11,8 @@ classdef class_flight_state
     
     properties
         
-        V
+        V % set maneuvering speed
+        V_EAS% set maneuvering speed(equivalent airspeed)
         
         %> Roll rate in body COS                          double      (1x1)   [rad/s]*
         p = 0    
@@ -60,18 +61,30 @@ classdef class_flight_state
         def;
         % gla surfaces (array of names)
         glaSurf;
-        % mla upper bounds
+        % gla upper bounds (deflection)
         glaUB;
-        % mla lower bounds
+        % gla lower bounds (deflection)
         glaLB;        
+        % gla setting - if not empty, no gla optimization is done and the
+        % glaVal is used 
+        glaVal;
+        % gla controller time step 
+        glaTs=[]
+        % roll surfaces (array of names)
+        rollSurf
+        % deflection used for roll 
+        rollDef
+        % rollAllocVal - if not empty, no rollalloc optimization is done
+        % and the rollAllocVal is used
+        rollAllocVal
+        
     end
     
     methods
         function obj=class_flight_state(H,V,alpha,beta,aircraft_state)     
            obj.h=H;
            obj.V=V;
-           [~,a,T,P,mu]=stdatmo(H);
-           [~,~,~,rho_air] = atmosisa(H);
+           [rho_air,a,T,P,mu]=stdatmo(H);
            Uinf=norm(V);
            Ma=Uinf/a;
            obj.aerodynamic_state=class_aero_state(Uinf,alpha,beta,Ma,rho_air,mu);
@@ -82,10 +95,15 @@ classdef class_flight_state
             Cl=2*obj.aircraft_state.weight*9.81*obj.load_factor/(obj.aerodynamic_state.rho_air*norm(obj.V)^2*S_ref);
         end
         
-        function obj=f_set_V_A(obj,V_A)
-            obj.aerodynamic_state.V_A=V_A; 
-            obj.aerodynamic_state.V_inf=[V_A*cosd(obj.aerodynamic_state.alpha)*cosd(obj.aerodynamic_state.beta)  V_A*sind(obj.aerodynamic_state.beta) V_A*sind(obj.aerodynamic_state.alpha)];
-            %obj.V_inf=[V_A*cosd(obj.alpha)*cosd(obj.beta)  V_A*sind(obj.beta) V_A*sind(obj.alpha)];
+        function obj=f_set_V_A(obj,V_A,varargin)
+            [rho_air,a,~,P0,mu]=stdatmo(obj.h);
+            if nargin==3
+               V_A=correctairspeed(V_A,a,P0,varargin{1},'TAS');
+            end
+            Ma=V_A/a;
+            obj.aerodynamic_state=class_aero_state(V_A,obj.aerodynamic_state.alpha,obj.aerodynamic_state.beta,Ma,rho_air,mu);
+            obj.V_EAS=correctairspeed(V_A,a,P0,'TAS','EAS');
+            obj.V=V_A;
         end
         
         
