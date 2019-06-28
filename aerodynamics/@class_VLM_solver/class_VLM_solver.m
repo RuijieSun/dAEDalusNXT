@@ -248,7 +248,7 @@ classdef class_VLM_solver
             for iCs=1:length(obj.control_surfaces)
                 if obj.control_surfaces(iCs).pos==2
                     if obj.control_surfaces(iCs).delta~=0
-                        obj=obj.deflect_nvec(obj.control_surfaces(iCs).name,obj.control_surfaces(iCs).delta,0);
+                        obj=obj.deflect_nvec(obj.control_surfaces(iCs).name,obj.control_surfaces(iCs).delta,0,0);
                     end
                 end
             end
@@ -279,7 +279,11 @@ classdef class_VLM_solver
                 
                 % runs if spoiler
                 elseif obj.control_surfaces(i).pos == 2
-                    sp_panel_idx = obj.control_surfaces(i).panelIds(1); %takes index of last panel of SP surface (TE of flap, gives direction vector of hingeline)
+                    if isempty(obj.control_surfaces(i).panelIdsUncorr)
+                        sp_panel_idx = obj.control_surfaces(i).panelIds(1); %takes index of last panel of SP surface (TE of flap, gives direction vector of hingeline)
+                    else
+                        sp_panel_idx = obj.control_surfaces(i).panelIdsUncorr(1); %takes index of last panel of SP surface (TE of flap, gives direction vector of hingeline)
+                    end
                     obj.rotation_vect(:,i) = obj.grid(:,obj.panels(2,sp_panel_idx))-obj.grid(:,obj.panels(1,sp_panel_idx)); %computes direction vector of hingeline
                     
                 end
@@ -308,7 +312,11 @@ classdef class_VLM_solver
                         obj.rotation_vect_sym(:,i) = obj.grid(:,obj.panels(3,te_panel_idx_sym))-obj.grid(:,obj.panels(4,te_panel_idx_sym));
 
                     elseif obj.control_surfaces(i).pos == 2
-                        sp_panel_idx_sym = obj.control_surfaces(i).panelIdsL(1);
+                        if isempty(obj.control_surfaces(i).panelIdsLUncorr)
+                            sp_panel_idx_sym = obj.control_surfaces(i).panelIdsL(1);
+                        else
+                            sp_panel_idx_sym = obj.control_surfaces(i).panelIdsLUncorr(1);
+                        end
                         obj.rotation_vect_sym(:,i) = obj.grid(:,obj.panels(2,sp_panel_idx_sym))-obj.grid(:,obj.panels(1,sp_panel_idx_sym));
 
                     end
@@ -330,8 +338,10 @@ classdef class_VLM_solver
         % deflects the normal vectors of the panels of the control surface
         % whose name is specified, by the specified deflection (positive
         % clockwise)
-        function obj = deflect_nvec(obj, name, deflection, flag_extra_rotation)
-            
+        function obj = deflect_nvec(obj, name, deflection, flag_extra_rotation, varargin)
+            if ~isempty(varargin)
+                asymFlag=varargin{1}; %flag for overwriting the symmetry condition (asym deflection enforced for symmetric control surfaces)
+            end
             % flag extra rotation determines whether the normal vectors
             % should be rotated by the value specified in the function
             % input, or by the value specified by the delta associated with
@@ -362,13 +372,19 @@ classdef class_VLM_solver
                     % if the CS in question is a spoiler, we always want to
                     % rotate the vectors by the Spoiler deflection
                     if obj.control_surfaces(i).pos == 2
-                        theta_rad = deg2rad(obj.control_surfaces(i).delta);
+                        if flag_extra_rotation == 2 % additional deflection
+                            theta_rad = deg2rad(obj.control_surfaces(i).delta)+theta_rad;
+                        else
+                            theta_rad = deg2rad(obj.control_surfaces(i).delta);
+                        end
                     end
+                    
+                    %correct angle for mach
+                    theta_rad=atan(tan(theta_rad)*obj.Ma_corr);
                     
                     % calculates rotation matrix using CS specific rotation
                     % vector and K_mat, complemented by the desired
                     % rotation angle
-                    rotation_matrix = eye(3) + sin(theta_rad) * obj.K_mat(:,:,i) + (1 - cos(theta_rad)) * obj.K_mat(:,:,i)^2;
                     
                     % loops through all normal vectors belonging to the
                     % current CS, and deflects them using the rotation
@@ -376,7 +392,13 @@ classdef class_VLM_solver
                     
                     % TODO: REWRITE LOOP BELOW SO THAT IT RUNS AS A SINGLE
                     % MATRIX OPERATION, RATHER THAN A DUMB FOR LOOP.
+                    if isempty(obj.control_surfaces(i).fractions)
+                        fractions=ones(size(obj.control_surfaces(i).panelIds));
+                    else
+                        fractions=obj.control_surfaces(i).fractions;
+                    end
                     for panel_count = 1:length(obj.control_surfaces(i).panelIds)
+                        rotation_matrix = eye(3) + sin(theta_rad*fractions(panel_count)) * obj.K_mat(:,:,i) + (1 - cos(theta_rad*fractions(panel_count))) * obj.K_mat(:,:,i)^2;
                         obj.colloc_nvec(:,obj.control_surfaces(i).panelIds(panel_count)) = rotation_matrix * obj.colloc_nvec(:,obj.control_surfaces(i).panelIds(panel_count));
                     end
                     
@@ -385,10 +407,15 @@ classdef class_VLM_solver
                     % above, only for symmetric equivalent of current CS
                     if obj.control_surfaces(i).is_sym == 1
                         
+                        
                         theta_rad_sym = deg2rad(deflection); %or maybe deflection(2) would be better?
                         
                         if obj.control_surfaces(i).pos == 2
-                            theta_rad_sym = deg2rad(obj.control_surfaces(i).delta);
+                            if flag_extra_rotation == 2
+                                theta_rad_sym = deg2rad(obj.control_surfaces(i).delta)+theta_rad_sym;
+                            else
+                                theta_rad_sym = deg2rad(obj.control_surfaces(i).delta);
+                            end
                         end
                         
                         if flag_extra_rotation == 0 
@@ -397,12 +424,17 @@ classdef class_VLM_solver
                                 theta_rad_sym = -deg2rad(obj.control_surfaces(i).delta_l_r(2));
                             end
                         end
+                        if asymFlag
+                            theta_rad_sym=-1*theta_rad_sym;
+                        end
                         
-                        rotation_matrix = eye(3) + sin(theta_rad_sym) * obj.K_mat_sym(:,:,i) + (1 - cos(theta_rad_sym)) * obj.K_mat_sym(:,:,i)^2;
-
+                        %correct angle for mach
+                        theta_rad_sym=atan(tan(theta_rad_sym)*obj.Ma_corr);
                         % TODO: REWRITE LOOP BELOW SO THAT IT RUNS AS A SINGLE
                         % MATRIX OPERATION, RATHER THAN A DUMB FOR LOOP.
                         for panel_count = 1:length(obj.control_surfaces(i).panelIds)
+                            rotation_matrix = eye(3) + sin(theta_rad_sym*fractions(panel_count)) * obj.K_mat_sym(:,:,i) + (1 - cos(theta_rad_sym*fractions(panel_count))) * obj.K_mat_sym(:,:,i)^2;
+
                             obj.colloc_nvec(:,obj.control_surfaces(i).panelIdsL(panel_count)) = rotation_matrix * obj.colloc_nvec(:,obj.control_surfaces(i).panelIdsL(panel_count));
                         end
                     end
@@ -1012,7 +1044,11 @@ classdef class_VLM_solver
         function obj=determine_boundary_conditions_deflection_pqr(obj,p,q,r,deflection_induced_speed)
             for i=1:length(obj.colloc)
                 dV=cross(obj.r(:,i),[p,q,r]);
-                obj.b(i)=-dot(obj.colloc_nvec(:,i),obj.Uinf+dV+deflection_induced_speed(:,i)')*(4*pi);
+                if ~isempty(deflection_induced_speed)
+                    obj.b(i)=-dot(obj.colloc_nvec(:,i),obj.Uinf+dV+deflection_induced_speed(:,i)')*(4*pi);
+                else
+                     obj.b(i)=-dot(obj.colloc_nvec(:,i),obj.Uinf+dV)*(4*pi);
+                end
             end
         end
         
@@ -1141,6 +1177,11 @@ classdef class_VLM_solver
             obj.Gamma=linsolve(obj.C,obj.b');
             obj=obj.f_postprocess(0);
         end
+        function obj=f_solve_fast_roll(obj,p)
+            obj=obj.determine_boundary_conditions_deflection_pqr(p,0,0,[]);
+            obj.Gamma=linsolve(obj.C,obj.b');
+            obj=obj.f_postprocess(0);
+        end
         
         function obj=f_solve_std(obj)
             obj=obj.solve_MEX_vor5();
@@ -1248,7 +1289,7 @@ classdef class_VLM_solver
             alpha=obj.state.alpha;
             beta=obj.state.beta;
             obj.Uinf=a2bf(norm(obj.Uinf),alpha,beta,obj.Ma_corr);
-            obj=obj.solve_MEX_vor5();
+%             obj=obj.solve_MEX_vor5();
             obj=obj.f_postprocess(CD_f);
             
             

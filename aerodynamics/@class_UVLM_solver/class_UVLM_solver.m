@@ -310,6 +310,7 @@ classdef class_UVLM_solver
                 iCs=0;
                 for iWing=1:length(aircraft.wings)
                     for iSeg=1:length(aircraft.wings(iWing).wing_segments)
+                        %te surfaces
                         if aircraft.wings(iWing).wing_segments(iSeg).has_te_cs
                              
                             iCs=iCs+1;
@@ -328,8 +329,35 @@ classdef class_UVLM_solver
                                 csHingeAxes=[csHingeAxes; [1 -1 1].*(aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1))/norm((aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_te_device(:,:,1)));];
                             end
                         end
+                        %spoilers
+                        if aircraft.wings(iWing).wing_segments(iSeg).has_sp_cs
+                            iCs=iCs+1;
+                            obj.csNames{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).sp_device.name];
+                            csPanelIds{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).sp_device.panelIds];
+                            if isempty(aircraft.wings(iWing).wing_segments(iSeg).sp_device.fractions)
+                                csFractions{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).sp_device.panelIds~=0];
+                            else
+                                csFractions{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).sp_device.fractions];
+                            end
+                            csHingePoints=[csHingePoints; aircraft.wings(iWing).wing_segments(iSeg).xyz_sp_device(:,:,1); ];
+                            csHingeAxes=[csHingeAxes; (aircraft.wings(iWing).wing_segments(iSeg).xyz_sp_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_sp_device(:,:,1))/norm((aircraft.wings(iWing).wing_segments(iSeg).xyz_sp_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_sp_device(:,:,1)));];
+                            if and(aircraft.wings(iWing).wing_segments(iSeg).sp_device.is_sym, aircraft.wings(iWing).symmetric)
+                                iCs=iCs+1;
+                                obj.csNames{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).sp_device.name '_l'];
+                                csPanelIds{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).sp_device.panelIdsL];
+                                
+                                if isempty(aircraft.wings(iWing).wing_segments(iSeg).sp_device.fractions)
+                                    csFractions{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).sp_device.panelIds~=0];
+                                else
+                                    csFractions{iCs}=[aircraft.wings(iWing).wing_segments(iSeg).sp_device.fractions];
+                                end
+                                csHingePoints=[csHingePoints; [1 -1 1].*aircraft.wings(iWing).wing_segments(iSeg).xyz_sp_device(:,:,1); ];
+                                csHingeAxes=[csHingeAxes; [1 -1 1].*(aircraft.wings(iWing).wing_segments(iSeg).xyz_sp_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_sp_device(:,:,1))/norm((aircraft.wings(iWing).wing_segments(iSeg).xyz_sp_device(:,:,2)-aircraft.wings(iWing).wing_segments(iSeg).xyz_sp_device(:,:,1)));];
+                            end
+                        end
                     end
                     
+                    %parametric cs
                     if ~isempty(aircraft.wings(iWing).parCS)
                         for iParCs=1:length(aircraft.wings(iWing).parCS)
                             iCs=iCs+1;
@@ -416,11 +444,29 @@ classdef class_UVLM_solver
                 obj.colloc(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.25+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.75-obj.state.p_ref';
                 %from p_ref to 1/2
                 obj.r_mid(:,i)=0.5*(obj.grid(:,obj.panels(2,i))+obj.grid(:,obj.panels(1,i)))*0.5+0.5*(obj.grid(:,obj.panels(3,i))+obj.grid(:,obj.panels(4,i)))*0.5-obj.state.p_ref';
+            end 
+            if obj.Ma_corr<1
+                obj.Uinf=a2bf(state.V_A,state.alpha,state.beta,obj.Ma_corr);
+                obj.grid(1,:)=grid(1,:)/obj.Ma_corr;
+                obj.grid(2,:)=grid(2,:);
+                obj.grid(3,:)=grid(3,:);
+                
+                obj.grid_undef(1,:)=grid_undef(1,:)/obj.Ma_corr;
+                obj.grid_undef(2,:)=grid_undef(2,:);
+                obj.grid_undef(3,:)=grid_undef(3,:);
+                obj.grid_wake(1,:)=grid_wake(1,:)/obj.Ma_corr;
+                obj.grid_wake(2,:)=grid_wake(2,:);
+                obj.grid_wake(3,:)=grid_wake(3,:);
+            else
+                obj.Uinf=a2bf(state.V_A,state.alpha,state.beta,1);
             end
             % compute hinge moment lever arms
             Rhat=zeros(length(obj.panels)*3,length(obj.panels)*3);
             obj.Khat=zeros(3*length(obj.panels),3*length(obj.panels),nCs);
             for iCs=1:nCs
+                % apply mach correction to hinge axis
+                csHingeAxes(iCs,1)=csHingeAxes(iCs,1)./obj.Ma_corr;
+                csHingeAxes(iCs,:)=csHingeAxes(iCs,:)./norm(csHingeAxes(iCs,:));
                 % vectors from p_ref to colloc points of cs
                 obj.r_cs(:,csPanelIds{iCs},iCs)=obj.colloc(:,csPanelIds{iCs})-repmat((csHingePoints(iCs,:)'-obj.state.p_ref'),1,length(csPanelIds{iCs}));
                 % vectors from p_ref to 1/4 points of cs
@@ -445,19 +491,7 @@ classdef class_UVLM_solver
                 obj.Rcs(iCs,:)=repmat(csHingeAxes(iCs,:),1,length(obj.panels))*Rhat;
                 obj.Rcss(iCs,:)=repmat(csHingeAxes(iCs,:),1,length(obj.panels))*RhatS;
             end
-            
-            if obj.Ma_corr<1
-                obj.Uinf=a2bf(state.V_A,state.alpha,state.beta,obj.Ma_corr);
-                obj.grid(1,:)=grid(1,:)/obj.Ma_corr;
-                obj.grid(2,:)=grid(2,:);
-                obj.grid(3,:)=grid(3,:);
-                
-                obj.grid_wake(1,:)=grid_wake(1,:)/obj.Ma_corr;
-                obj.grid_wake(2,:)=grid_wake(2,:);
-                obj.grid_wake(3,:)=grid_wake(3,:);
-            else
-                obj.Uinf=a2bf(state.V_A,state.alpha,state.beta,1);
-            end
+           
             
             obj.gridpoint_to_panel=zeros(length(obj.grid),4);
             for i=1:length(obj.panels)
