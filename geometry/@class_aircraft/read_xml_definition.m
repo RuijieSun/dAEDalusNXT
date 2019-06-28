@@ -219,11 +219,16 @@ if strcmp(xmlstruct.child(1).tag,'DAEDALUS')
                         specialSettings.wingTminSK=str2num(xml_aircraft.child(i).child(j).value);
                     case 'WING_T_MIN_SP'
                         specialSettings.wingTminSP=str2num(xml_aircraft.child(i).child(j).value);
+                    case 'WING_T_MIN_ST'
+                        specialSettings.wingTminST=str2num(xml_aircraft.child(i).child(j).value);
                     case 'FUS_T_MIN_SK'
                         specialSettings.fusTminSK=str2num(xml_aircraft.child(i).child(j).value);
                     case 'FUS_T_MIN_SP'
                         specialSettings.fusTminSP=str2num(xml_aircraft.child(i).child(j).value);  
-                        
+                    case 'STRINGERS_DENSITY_ROOT'
+                        specialSettings.stringersDensityRoot=str2num(xml_aircraft.child(i).child(j).value)/obj.reference.c_ref;   %here stored per meter   
+                    case 'STRINGERS_DENSITY_TIP'
+                        specialSettings.stringersDensityTip=str2num(xml_aircraft.child(i).child(j).value)/obj.reference.c_ref;   %here stored per meter   
                     % Properties used only when the material is anisotropic
                     case 'SKINS_LAYUP'
                         specialSettings.skins_ply_material = xml_aircraft.child(i).child(j).child(1).value;
@@ -234,6 +239,10 @@ if strcmp(xmlstruct.child(1).tag,'DAEDALUS')
                         specialSettings.spars_ply_material = xml_aircraft.child(i).child(j).child(1).value;
                         specialSettings.spars_layup_angles = str2double(strsplit(xml_aircraft.child(i).child(j).child(2).value,{',',' ',', '}));
                         specialSettings.spars_layup_fractions = str2double(strsplit(xml_aircraft.child(i).child(j).child(3).value,{',',' ',', '}));
+                    case 'STRINGERS_LAYUP'
+                        specialSettings.stringers_ply_material = xml_aircraft.child(i).child(j).child(1).value;
+                        specialSettings.stringers_layup_angles = str2double(strsplit(xml_aircraft.child(i).child(j).child(2).value,{',',' ',', '}));
+                        specialSettings.stringers_layup_fractions = str2double(strsplit(xml_aircraft.child(i).child(j).child(3).value,{',',' ',', '}));
                 end
                 obj.addSettings=specialSettings;
             end

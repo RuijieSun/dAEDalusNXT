@@ -447,7 +447,7 @@ classdef class_fuselagesegment
         end
         
         function obj=plot_elliptical_segment(obj)
-            
+            color=[199 246 236]./255;
             caxis([0 1])
             
             ncirc=obj.n_circ+1;
@@ -459,8 +459,8 @@ classdef class_fuselagesegment
                 coords_front=obj.shell_coords(:,1+ncirc*(i-1):ncirc*i)';
                 coords_rear=obj.shell_coords(:,1+ncirc*i:ncirc*(i+1))';
                 
-                surface([coords_front(:,1) coords_rear(:,1)],[coords_front(:,2) coords_rear(:,2)],[coords_front(:,3) coords_rear(:,3)],0.9*ones(obj.n_circ,2),'FaceAlpha',0.3);
-                
+                c=surface([coords_front(:,1) coords_rear(:,1)],[coords_front(:,2) coords_rear(:,2)],[coords_front(:,3) coords_rear(:,3)],0.9*ones(obj.n_circ,2),'FaceAlpha',0.3);
+                c.FaceColor=color;
             end
             axis equal
             grid on

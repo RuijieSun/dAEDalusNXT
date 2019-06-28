@@ -746,7 +746,13 @@ classdef class_aerosurface
                     profile_t=obj.wing_segments(segment_idx).profile_t;
                     s1=class_wingsegment([xyz(:,1) p1n p4n xyz(:,4)],symm,profile_r,profile_t);
                     s2=class_wingsegment([p1n p2n p3n p4n],symm,profile_r,profile_t);
-                    
+                elseif f_1==0
+                    profile_r1=obj.wing_segments(segment_idx).profile_r;
+                    profile_t1=obj.wing_segments(segment_idx).get_profile(f_2);
+                    profile_r2=profile_t1;
+                    profile_t2=obj.wing_segments(segment_idx).profile_t;
+                    s2=class_wingsegment([xyz(:,1) p2n p3n xyz(:,4)],symm,profile_r1,profile_t1);
+                    s3=class_wingsegment([p2n xyz(:,2) xyz(:,3) p3n],symm,profile_r2,profile_t2);
                 else
                     profile_r=obj.wing_segments(segment_idx).get_profile(f_1);
                     profile_t=obj.wing_segments(segment_idx).get_profile(f_2);
@@ -1090,396 +1096,161 @@ classdef class_aerosurface
             obj.opposite_te_vol=[op_idx obj.is_te*0];
         end
         
-        function panel_to_beam_element=compute_force_interpolation_matrix(obj,panel_to_beam_element,panels,grid)
-            % for debugging
-            observer=0;
-            
-            % for debugging
-            if observer==1
-                figure(1)
-                % obj.plot_grid
-                hold on
+        function panel_to_beam_element=compute_force_interpolation_matrix(obj,panel_to_beam_element)
+            %% clear data in panel_to_beam_element 
+            panel_to_beam_element(obj.panel_start_idx:obj.panel_start_idx+size(obj.panels,2)-1,:)=panel_to_beam_element(obj.panel_start_idx:obj.panel_start_idx+size(obj.panels,2)-1,:)*0;
+            %% str grid points
+            if obj.symmetric
+                aerGrid=obj.grid(:,1:end/2);
+                aerPan=obj.panels(:,1:end/2);
+            else
+                aerGrid=obj.grid;
+                aerPan=obj.panels;
             end
-            
-            % start with beam index 1
-            beam_idx=1;
-            
-            % do for all wing segments
-            for k=1:length(obj.wing_segments)
-                next_segment=0;
-                prev_segment=0;
-                % do for all beam elements in this wing segment
-                for kk=1:length(obj.wing_segments(k).wingbox_coords(1,:,1))-1
-                    %get current beamelement points; inner: B1; outer: B2
-                    B1=0.5*obj.wing_segments(k).wingbox_coords(:,kk,1)+0.5*obj.wing_segments(k).wingbox_coords(:,kk,2);
-                    B2=0.5*obj.wing_segments(k).wingbox_coords(:,kk+1,1)+0.5*obj.wing_segments(k).wingbox_coords(:,kk+1,2);
-                    %get 4 corner points of wing segment, 1:front left
-                    %2:front right, 3: rear right, 4: rear left
-                    P1=obj.wing_segments(k).xyz(:,1);
-                    P2=obj.wing_segments(k).xyz(:,2);
-                    P3=obj.wing_segments(k).xyz(:,3);
-                    P4=obj.wing_segments(k).xyz(:,4);
-                    
-                    segment=[P1 P2 P3 P4];
-                    beamelement=[B1 B2];
-                    
-                    %% U1
-                    % U1 is the intersection point of the leading edge of
-                    % the wingsegment and a plane normal to the
-                    % beamelement through B1
-                    
-                    % beam node 1
-                    
-                    diff_1=B2-B1;
-                    
-                    [nono,comp_idx_2]=max(diff_1);  %comp_idx_2 = Main Direction
-                    diff_1(comp_idx_2)=0;
-                    [nono,comp_idx_1]=max(diff_1);  %comp_idx_1 = Second Main Direction
-                    if comp_idx_1==comp_idx_2
-                        if comp_idx_1==3
-                            comp_idx_2=1;
-                        else
-                            comp_idx_1=comp_idx_2+1;
-                        end
-                    end
-                    n1=cross((B1-P2),(B1-P1));  % normal vector of plane through leading edge of segment and B1 
-                    n1=n1/norm(n1);
-                    rb1=cross((B2-B1),n1); %normal vector to beam element in plane normal to n1
-                    rb1=rb1/norm(rb1);
-                    rp=P2-P1;
-                    %lambda=(B1(1)-P1(1)-B1(2)*rp(1)/rp(2)+P1(2)*rp(1)/rp(2))/(rb1(2)*rp(1)/rp(2)-rb1(1));
-                    if (((P1(comp_idx_1)*(P2(comp_idx_2)-P1(comp_idx_2))+(B1(comp_idx_2)-P1(comp_idx_2))*(P2(comp_idx_1)-P1(comp_idx_1))-B1(comp_idx_1)*(P2(comp_idx_2)-P1(comp_idx_2)))~=0) && ((rb1(comp_idx_1)*(P2(comp_idx_2)-P1(comp_idx_2))-rb1(comp_idx_2)*(P2(comp_idx_1)-P1(comp_idx_1)))~=0))
-                        lambda=(P1(comp_idx_1)*(P2(comp_idx_2)-P1(comp_idx_2))+(B1(comp_idx_2)-P1(comp_idx_2))*(P2(comp_idx_1)-P1(comp_idx_1))-B1(comp_idx_1)*(P2(comp_idx_2)-P1(comp_idx_2)))/(rb1(comp_idx_1)*(P2(comp_idx_2)-P1(comp_idx_2))-rb1(comp_idx_2)*(P2(comp_idx_1)-P1(comp_idx_1)));
-                    else
-                        lambda=0;
-                    end
-                    U1=B1+lambda*rb1;
-                    %Correction S.Binder
-                    %works better when the intersection point is computed between a plane normal
-                    %to the beam element and through B1 and the leading edge
-                    U1=P1+(dot((B1-P1),(B2-B1))/dot((P2-P1),(B2-B1)))*((P2-P1));
-                    
-                    
-                    % U12=B1+lambda*rb1;
-                    search_idx=2;
-                    if P2(2)-P1(2)>0
-                        search_idx=2;
-                    elseif P2(3)-P1(3)>0
-                        search_idx=3;
-                    elseif P2(1)-P1(1)>0
-                        search_idx=1;
-                    end
-                    lambda=(U1(search_idx)-P1(search_idx))/(P2(search_idx)-P1(search_idx));
-                    errU1_online=norm(U1-P1-lambda*(P2-P1));
-                    U1=P1+lambda*(P2-P1);
-                    if lambda>1+100*eps
-                        next_segment=1;
-                    elseif lambda<0.0-100*eps
-                        prev_segment=1;
-                    end
-                    %% U2
-                    % U2 is the intersection point of the leading edge of
-                    % the wingsegment and a plane normal to the
-                    % beamelement through B2
-                    
-                    n1=cross((B1-P3),(B1-P4));
-                    n1=n1/norm(n1);
-                    rb1=cross((B2-B1),n1);
-                    rb1=rb1/norm(rb1);
-                    rp=P4-P3;
-                    %lambda=(B1(1)-P4(1)-B1(2)*rp(1)/rp(2)+P4(2)*rp(1)/rp(2))/(rb1(2)*rp(1)/rp(2)-rb1(1));
-                    
-                    if (((P4(comp_idx_1)*(P3(comp_idx_2)-P4(comp_idx_2))+(B1(comp_idx_2)-P4(comp_idx_2))*(P3(comp_idx_1)-P4(comp_idx_1))-B1(comp_idx_1)*(P3(comp_idx_2)-P4(comp_idx_2)))~=0) &&((rb1(comp_idx_1)*(P3(comp_idx_2)-P4(comp_idx_2))-rb1(comp_idx_2)*(P3(comp_idx_1)-P4(comp_idx_1)))~=0))
-                        lambda=(P4(comp_idx_1)*(P3(comp_idx_2)-P4(comp_idx_2))+(B1(comp_idx_2)-P4(comp_idx_2))*(P3(comp_idx_1)-P4(comp_idx_1))-B1(comp_idx_1)*(P3(comp_idx_2)-P4(comp_idx_2)))/(rb1(comp_idx_1)*(P3(comp_idx_2)-P4(comp_idx_2))-rb1(comp_idx_2)*(P3(comp_idx_1)-P4(comp_idx_1)));
-                    else
-                        lambda=0;
-                    end
-                    
-                    U2=B1+lambda*rb1;
-                    
-                    %Correction S.Binder
-                    %works better when the intersection point is computed between a plane normal
-                    %to the beam element and through B2 and the leading edge
-                    U2=P3+(dot((B1-P3),(B2-B1))/dot((P3-P4),(B2-B1)))*((P3-P4));
-                    %U22=B1+lambda2*rb1;
-                    errU2=norm(U2-B1-lambda*rb1);
-                    search_idx=2;
-                    if P2(2)-P1(2)>0
-                        search_idx=2;
-                    elseif P2(3)-P1(3)>0
-                        search_idx=3;
-                    elseif P2(1)-P1(1)>0
-                        search_idx=1;
-                    end
-                    lambda=(U2(search_idx)-P4(search_idx))/(P3(search_idx)-P4(search_idx));
-                    errU2_online=norm(U2-P4-lambda*(P3-P4));
-                    U2=P4+lambda*(P3-P4);
-                    if lambda>1+100*eps
-                        next_segment=1;
-                    elseif lambda<0.0-100*eps
-                        prev_segment=1;
-                    end
-                    %% U3
-                    % U3 is the intersection point of the trailing edge of
-                    % the wingsegment and a plane normal to the
-                    % beamelement through B2
-                    
-                    n2=cross((B2-P2),(B2-P1));
-                    n2=n2/norm(n2);
-                    rb2=cross((B2-B1),n2);
-                    rb2=rb2/norm(rb2);
-                    rp=P2-P1;
-                    
-                    if (((B2(comp_idx_1)-P1(comp_idx_1)-B2(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2)+P1(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2))~=0) && ((rb2(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2)-rb2(comp_idx_1))~=0))
-                        lambda=(B2(comp_idx_1)-P1(comp_idx_1)-B2(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2)+P1(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2))/(rb2(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2)-rb2(comp_idx_1));
-                    else
-                        lambda=0;
-                    end
-                    U3=B2+lambda*rb2;
-                    
-                    %Correction S.Binder
-                    %works better when the intersection point is computed between a plane normal
-                    %to the beam element and through B2 and the trailing edge
-                    U3=P1+(dot((B2-P1),(B2-B1))/dot((P2-P1),(B2-B1)))*((P2-P1));
-                    errU3=norm(U3-B2-lambda*rb2);
-                    search_idx=2;
-                    if P2(2)-P1(2)>0
-                        search_idx=2;
-                    elseif P2(3)-P1(3)>0
-                        search_idx=3;
-                    elseif P2(1)-P1(1)>0
-                        search_idx=1;
-                    end
-                    
-                    lambda=(U3(search_idx)-P1(search_idx))/(P2(search_idx)-P1(search_idx));
-                    U3=P1+lambda*(P2-P1);
-                    errU3_online=norm(U3-P1-lambda*(P2-P1));
-                    if lambda>1+100*eps
-                        next_segment=1;
-                    elseif lambda<0.0-100*eps
-                        prev_segment=1;
-                    end
-                    
-                    %% U4
-                    % U4 is the intersection point of the trailing edge of
-                    % the wingsegment and a plane normal to the
-                    % beamelement through B1
-                    
-                    n2=cross((B2-P3),(B2-P4));
-                    n2=n2/norm(n2);
-                    rb2=cross((B2-B1),n2);
-                    rb2=rb2/norm(rb2);
-                    rp=P4-P3;
-                    if (((B2(comp_idx_1)-P4(comp_idx_1)-B2(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2)+P4(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2))~=0) && ((rb2(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2)-rb2(comp_idx_1))~=0))
-                        lambda=(B2(comp_idx_1)-P4(comp_idx_1)-B2(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2)+P4(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2))/(rb2(comp_idx_2)*rp(comp_idx_1)/rp(comp_idx_2)-rb2(comp_idx_1));
-                    else
-                        lambda=0;
-                    end
-                        
-                    U4=B2+lambda*rb2;
-                    
-                    %Correction S.Binder
-                    %works better when the intersection point is computed between a plane normal
-                    %to the beam element and through B1 and the trailing edge
-                    U4=P3+(dot((B2-P3),(B2-B1))/dot((P3-P4),(B2-B1)))*((P3-P4));
-                    %                     errU4=norm(U4-B2-lambda*rb2);
-                    %                     if errU4>1E-10
-                    %                         disp('geometry error');
-                    %                     end
-                    % check if point is in between P4 and P3
-                    search_idx=2;
-                    if P2(2)-P1(2)>0
-                        search_idx=2;
-                    elseif P2(3)-P1(3)>0
-                        search_idx=3;
-                    elseif P2(1)-P1(1)>0
-                        search_idx=1;
-                    end
-                    lambda=(U4(search_idx)-P4(search_idx))/(P3(search_idx)-P4(search_idx));
-                    U4=P4+lambda*(P3-P4);
-                    errU4_online=norm(U4-P4-lambda*(P3-P4));
-                    if lambda>1+100*eps
-                        next_segment=1;
-                    elseif lambda<0.0-100*eps
-                        prev_segment=1;
-                    end
-                    
-%                     obj.plot_grid
-%                     fill3(segment(1,:),segment(2,:),segment(3,:),0.4);
-%                     axis equal
-%                     
-%                     
-%                                         plot3(beamelement(1,:),beamelement(2,:),beamelement(3,:),'r')
-%                                         plot3([beamelement(1,1) beamelement(1,1)+n1(1)],[beamelement(2,1) beamelement(2,1)+n1(2)],[beamelement(3,1) beamelement(3,1)+n1(3)],'r')
-%                                         plot3([beamelement(1,1) beamelement(1,1)+rb1(1)],[beamelement(2,1) beamelement(2,1)+rb1(2)],[beamelement(3,1) beamelement(3,1)+rb1(3)],'r')
-%                     
-%                                         plot3([beamelement(1,2) beamelement(1,2)+n2(1)],[beamelement(2,2) beamelement(2,2)+n2(2)],[beamelement(3,2) beamelement(3,2)+n2(3)],'r')
-%                                         plot3([beamelement(1,2) beamelement(1,2)+rb2(1)],[beamelement(2,2) beamelement(2,2)+rb2(2)],[beamelement(3,2) beamelement(3,2)+rb2(3)],'r')
-%                     
-%                                         plot3(U1(1),U1(2),U1(3),'bx')
-%                                         plot3(U2(1),U2(2),U2(3),'bx')
-%                                         plot3(U3(1),U3(2),U3(3),'bx')
-%                                         plot3(U4(1),U4(2),U4(3),'bx')
-                    
-                    block=[U1 U3 U4 U2];
-                    
-                    if next_segment==1
-                        if k+1<=length(obj.wing_segments)
-                            lim_block=cut_line_quad(obj.wing_segments(k).xyz(:,2:3),block);
-                            if size(lim_block,2)>=2
-                                
-                                lp1=norm(lim_block(:,1)-obj.wing_segments(k).xyz(:,2))/norm(obj.wing_segments(k).xyz(:,3)-obj.wing_segments(k).xyz(:,2));
-                                lp2=norm(lim_block(:,2)-obj.wing_segments(k).xyz(:,2))/norm(obj.wing_segments(k).xyz(:,3)-obj.wing_segments(k).xyz(:,2));
-                                
-                                if lp1>0.01
-                                    P1_next=obj.wing_segments(k+1).xyz(:,1)+lp1*(obj.wing_segments(k+1).xyz(:,4)-obj.wing_segments(k+1).xyz(:,1));
-                                    P2_next=obj.wing_segments(k+1).xyz(:,1)+lp2*(obj.wing_segments(k+1).xyz(:,4)-obj.wing_segments(k+1).xyz(:,1));
-                                    
-                                    n_next=cross((P2_next-obj.wing_segments(k+1).xyz(:,1)),(obj.wing_segments(k+1).xyz(:,2)-P2_next));
-                                    n_next=n_next/norm(n_next);
-                                    rb_next=cross((B2-B1),n_next);
-                                    rb_next=rb_next/norm(rb_next);
-                                    rp_next=obj.wing_segments(k+1).xyz(:,2)-obj.wing_segments(k+1).xyz(:,1);
-                                    lambda=(P2_next(1)-obj.wing_segments(k+1).xyz(1,1)-P2_next(2)*rp_next(1)/rp_next(2)+obj.wing_segments(k+1).xyz(2,1)*rp_next(1)/rp_next(2))/(rb_next(2)*rp_next(1)/rp_next(2)-rb_next(1));
-                                    P3_next=P2_next+lambda*rb_next;
-                                    lambda=(P1_next(1)-obj.wing_segments(k+1).xyz(1,1)-P1_next(2)*rp_next(1)/rp_next(2)+obj.wing_segments(k+1).xyz(2,1)*rp_next(1)/rp_next(2))/(rb_next(2)*rp_next(1)/rp_next(2)-rb_next(1));
-                                    P4_next=P1_next+lambda*rb_next;
-                                    block_next=[P1_next P2_next P3_next P4_next];
-                                else
-                                    P1_next=obj.wing_segments(k+1).xyz(:,1);
-                                    P2_next=obj.wing_segments(k+1).xyz(:,1)+lp2*(obj.wing_segments(k+1).xyz(:,4)-obj.wing_segments(k+1).xyz(:,1));
-                                    n_next=cross((P2_next-obj.wing_segments(k+1).xyz(:,1)),(obj.wing_segments(k+1).xyz(:,2)-P2_next));
-                                    n_next=n_next/norm(n_next);
-                                    rb_next=cross((B2-B1),n_next);
-                                    rb_next=rb_next/norm(rb_next);
-                                    rp_next=obj.wing_segments(k+1).xyz(:,2)-obj.wing_segments(k+1).xyz(:,1);
-                                    lambda=(P2_next(1)-obj.wing_segments(k+1).xyz(1,1)-P2_next(2)*rp_next(1)/rp_next(2)+obj.wing_segments(k+1).xyz(2,1)*rp_next(1)/rp_next(2))/(rb_next(2)*rp_next(1)/rp_next(2)-rb_next(1));
-                                    P3_next=P2_next+lambda*rb_next;
-                                    block_next=[P1_next P2_next P3_next];
-                                end
-                                %TODO CHECK if comp idx is needed for main direction in initialize_beam_to_panel_for_block
-                                panel_to_beam_element=obj.initialize_beam_to_panel_for_block(beam_idx,k+1,block_next,panels,grid,panel_to_beam_element,0,comp_idx_2);
-                                if observer
-									h=fill3(block_next(1,:),block_next(2,:),block_next(3,:),'r');
-                                	set(h,'facealpha',.25);
-								end
-                            end
-                        end
-                        next_segment=0;
-                    end
-                    
-                    if prev_segment==1
-                        if k>=2
-                            lim_block=cut_line_quad(obj.wing_segments(k).xyz(:,[1 4]),block);
-                            
-                            if size(lim_block,2)>=2
-                                lp1=norm(lim_block(:,2)-obj.wing_segments(k).xyz(:,1))/norm(obj.wing_segments(k).xyz(:,4)-obj.wing_segments(k).xyz(:,1));
-                                lp2=norm(lim_block(:,1)-obj.wing_segments(k).xyz(:,1))/norm(obj.wing_segments(k).xyz(:,4)-obj.wing_segments(k).xyz(:,1));
-                                
-                                if lp2<0.99
-                                    P1_prev=obj.wing_segments(k-1).xyz(:,2)+lp1*(obj.wing_segments(k-1).xyz(:,3)-obj.wing_segments(k-1).xyz(:,2));
-                                    P2_prev=obj.wing_segments(k-1).xyz(:,2)+lp2*(obj.wing_segments(k-1).xyz(:,3)-obj.wing_segments(k-1).xyz(:,2));
-                                    n_prev=cross((P1_prev-obj.wing_segments(k-1).xyz(:,3)),(obj.wing_segments(k-1).xyz(:,4)-P1_prev));
-                                    n_prev=n_prev/norm(n_prev);
-                                    rb_prev=cross((B2-B1),n_prev);
-                                    rb_prev=rb_prev/norm(rb_prev);
-                                    rp_prev=obj.wing_segments(k-1).xyz(:,4)-obj.wing_segments(k-1).xyz(:,3);
-                                    lambda=(P2_prev(1)-obj.wing_segments(k-1).xyz(1,3)-P2_prev(2)*rp_prev(1)/rp_prev(2)+obj.wing_segments(k-1).xyz(2,3)*rp_prev(1)/rp_prev(2))/(rb_prev(2)*rp_prev(1)/rp_prev(2)-rb_prev(1));
-                                    P3_prev=P2_prev+lambda*rb_prev;
-                                    lambda=(P1_prev(1)-obj.wing_segments(k-1).xyz(1,3)-P1_prev(2)*rp_prev(1)/rp_prev(2)+obj.wing_segments(k-1).xyz(2,3)*rp_prev(1)/rp_prev(2))/(rb_prev(2)*rp_prev(1)/rp_prev(2)-rb_prev(1));
-                                    P4_prev=P1_prev+lambda*rb_prev;
-                                    block_prev=[P1_prev P2_prev P3_prev P4_prev];
-                                else
-                                    P1_prev=obj.wing_segments(k-1).xyz(:,2)+lp1*(obj.wing_segments(k-1).xyz(:,3)-obj.wing_segments(k-1).xyz(:,2));
-                                    P2_prev=obj.wing_segments(k-1).xyz(:,3);
-                                    n_prev=cross((P1_prev-obj.wing_segments(k-1).xyz(:,3)),(obj.wing_segments(k-1).xyz(:,4)-P1_prev));
-                                    n_prev=n_prev/norm(n_prev);
-                                    rb_prev=cross((B2-B1),n_prev);
-                                    rb_prev=rb_prev/norm(rb_prev);
-                                    rp_prev=obj.wing_segments(k-1).xyz(:,4)-obj.wing_segments(k-1).xyz(:,3);
-                                    lambda=(P1_prev(1)-obj.wing_segments(k-1).xyz(1,3)-P1_prev(2)*rp_prev(1)/rp_prev(2)+obj.wing_segments(k-1).xyz(2,3)*rp_prev(1)/rp_prev(2))/(rb_prev(2)*rp_prev(1)/rp_prev(2)-rb_prev(1));
-                                    P3_prev=P1_prev+lambda*rb_prev;
-                                    
-                                    block_prev=[P1_prev P2_prev P3_prev];
-                                end
-                                %TODO CHECK if comp idx is needed for main direction in initialize_beam_to_panel_for_block
-                                panel_to_beam_element=obj.initialize_beam_to_panel_for_block(beam_idx,k-1,block_prev,panels,grid,panel_to_beam_element,0,comp_idx_2);
-                                if observer
-									h=fill3(block_prev(1,:),block_prev(2,:),block_prev(3,:),'r');
-                                	set(h,'facealpha',.25);
-								end
-                            end
-                        end
-                        prev_segment=0;
-                    end
-                    %fill3(block(1,:),block(2,:),block(3,:),0.4);
-                    
-                    %TODO CHECK if comp idx is needed for main direction in initialize_beam_to_panel_for_block
-                    panel_to_beam_element=obj.initialize_beam_to_panel_for_block(beam_idx,k,block,panels,grid,panel_to_beam_element,0,comp_idx_2);
-                    beam_idx=beam_idx+1;
-                end
-            end
+            strGrid=(obj.wingbox_coords(:,:,1)+obj.wingbox_coords(:,:,2))/2;
+%             figure(1);
+%             hold on; scatter3(strGrid(1,:),strGrid(2,:),strGrid(3,:),'ro','filled')
 
-            
-  
-            for j=obj.panel_start_idx:1:size(obj.panels,2)
-                sum=0;
-                for i=2:5:size(panel_to_beam_element,2)
-                    sum=sum+panel_to_beam_element(j,i);
+            %% loop over elements
+            for iEl=1:size(strGrid,2)-1
+                if iEl==1
+                    distIB=1*ones(1,size(aerGrid,2));
+                    pIB=[];
+                    nIB=[];
+                else
+                    pIB=pOB;
+                    nIB=nOB;
+                    distIB=distOB;
                 end
-                if sum==0 && panel_to_beam_element(j,1)~=0
-                    disp('WARNING: panel has zero area')
-                    panel_to_beam_element(j,2)=1;
-                    if j>1
-                        panel_to_beam_element(j,1)=panel_to_beam_element(j-1,1);
+                if iEl==length(strGrid)-1
+                    distOB=-1*ones(1,size(aerGrid,2));
+                else
+                    if iEl==1
+                        %compute plane normal vector Outboard
+                        direction=(((strGrid(:,iEl+1)-strGrid(:,iEl))+(strGrid(:,iEl+2)-strGrid(:,iEl+1)))/2);
+                    else
+                        %compute plane normal vector Outboard
+                        direction=(((strGrid(:,iEl)-strGrid(:,iEl-1))+(strGrid(:,iEl+1)-strGrid(:,iEl))+(strGrid(:,iEl+2)-strGrid(:,iEl+1)))/2);
+                    end
+                    nOB=direction/norm(direction);
+                    pOB=strGrid(:,iEl+1);
+                    %claculate distance of aerGrid to plane between beam element iEl and beam element iEl+1
+                    pqOB=aerGrid-pOB;
+                    distOB=dot(pqOB,repmat(nOB,1,size(pqOB,2)));
+                    % for all beam elements 
+                end
+                insideFlag=and(distOB<=0,distIB>0);
+
+                %% check plot
+%                 figure;
+%                 scatter3(obj.grid(1,1:end/2),obj.grid(2,1:end/2),obj.grid(3,1:end/2),'o')
+%                 hold on;
+%                 scatter3(aerGrid(1,insideFlag),aerGrid(2,insideFlag),aerGrid(3,insideFlag),'+')
+                %% loop over all panels and fill table
+                b1=strGrid(:,iEl);
+                b2=strGrid(:,iEl+1);
+                bAx = b2 - b1;
+                for iPan=1:size(aerPan,2)
+                    if ~any(insideFlag(aerPan(:,iPan)))
+                        % special case of small beam elements and large aero panels:
+                        % panels which are both, not completely outboard nor completely inboard
+                        % of this beam element need to be split as well; 
+                        if and(all(distIB(aerPan([1,4],iPan))<0), all(distOB(aerPan([2 3],iPan))>0))
+                            insideFlag(aerPan(1,iPan))=1; %set insideFlag active for one vertex so that it will be split in the next step
+                        end
+                    end
+
+                    if any(insideFlag(aerPan(:,iPan))) %panel iPan fully or partially belonging to this iEl
+                        % calc normal distance from 1/4 point of panel to beam element
+                        % axis
+                        % quarter point of panel
+                        qp=.75*mean(aerGrid(:,aerPan(1:2,iPan)),2)+.25*mean(aerGrid(:,aerPan(3:4,iPan)),2);
+                        % point of intersection of a plane normal to the beam axis
+                        % through qp
+                        s=b2 + ((bAx / norm(bAx)) * (qp - (b2))') * (bAx / norm(bAx));
+                        % distance of qp  from s
+                        dist=qp-s;
+                        if all(insideFlag(aerPan(:,iPan))) %fully belonging to this iEl
+                            % fill ptb matrix for fully contained panel
+                            panel_to_beam_element(obj.panel_start_idx-1+iPan,[1:5])=[iEl 1 dist'];
+                        else %partially belonging to this iEl
+                            % estimate part of area of panel positive of IB
+                            if iEl==1
+                                pAreaIB=1;
+                            else
+                                p1distIB=distIB(aerPan(1,iPan));
+                                p2distIB=distIB(aerPan(2,iPan));
+                                p3distIB=distIB(aerPan(3,iPan));
+                                p4distIB=distIB(aerPan(4,iPan));
+                                if and(p1distIB<=0,p2distIB<=0)
+                                    pLeIB=0;
+                                elseif and(p1distIB>=0,p2distIB>=0)
+                                    pLeIB=1;
+                                else
+                                    pLeIB=p2distIB/(abs(p1distIB)+abs(p2distIB));
+                                end
+                                if and(p4distIB<=0,p3distIB<=0)
+                                    pTeIB=0;
+                                elseif and(p4distIB>=0,p3distIB>=0)
+                                    pTeIB=1;
+                                else
+                                    pTeIB=p3distIB/(abs(p4distIB)+abs(p3distIB));
+                                end
+                                pAreaIB=0.5*pTeIB+0.5*pLeIB;
+                            end
+                            % estimate part of area of panel positive of OB
+                            if iEl==size(strGrid,2)-1
+                                pAreaOB=0;
+                            else
+                                p1distOB=distOB(aerPan(1,iPan));
+                                p2distOB=distOB(aerPan(2,iPan));
+                                p3distOB=distOB(aerPan(3,iPan));
+                                p4distOB=distOB(aerPan(4,iPan));
+                                if and(p1distOB<=0,p2distOB<=0)
+                                    pLeOB=0;
+                                elseif and(p1distOB>=0,p2distOB>=0)
+                                    pLeOB=1;
+                                else
+                                    pLeOB=p2distOB/(abs(p1distOB)+abs(p2distOB));
+                                end
+                                if and(p4distOB<=0,p3distOB<=0)
+                                    pTeOB=0;
+                                elseif and(p4distOB>=0,p3distOB>=0)
+                                    pTeOB=1;
+                                else
+                                    pTeOB=p3distOB/(abs(p4distOB)+abs(p3distOB));
+                                end
+                                pAreaOB=0.5*pTeOB+0.5*pLeOB;
+                            end
+                            % get part inbetween
+                            pArea=pAreaIB-pAreaOB;
+                            % fill ptb matrix for panel partially belonging to this iEl
+                            if all(panel_to_beam_element(obj.panel_start_idx-1+iPan,[1:5])==0)
+                                %panel is first associated to this beam element
+                                panel_to_beam_element(obj.panel_start_idx-1+iPan,[1:5])=[iEl pArea dist'];
+                            elseif all(panel_to_beam_element(obj.panel_start_idx-1+iPan,[6:10])==0)
+                                %panel is already associated to other beam element
+                                panel_to_beam_element(obj.panel_start_idx-1+iPan,[6:10])=[iEl pArea dist'];
+                            elseif all(panel_to_beam_element(obj.panel_start_idx-1+iPan,[11:15])==0)
+                                %panel is already associated to two other beam elements
+                                panel_to_beam_element(obj.panel_start_idx-1+iPan,[11:15])=[iEl pArea dist'];
+                            else
+                                %panel is associated to three other beam elements
+                                disp('warning: panel can not be associated to more than three beam elements')
+                            end
+                        end
                     end
                 end
             end
-            
-            for j=1:size(panels,2)
-                sum=0;
-                for i=2:5:size(panel_to_beam_element,2)
-                     sum=sum+panel_to_beam_element(j,i);
-                end
-                if sum>eps
-                    if sum<0.98
-						if observer
-                        	h=fill3(grid(1,panels(:,j)),grid(2,panels(:,j)),grid(3,panels(:,j)),'y');
-                        	set(h,'facealpha',.25);
-						end
-                    end
-                    %                      beam_splits=0;
-                    for i=2:5:size(panel_to_beam_element,2)
-                        %                         if obj.panel_to_beam_element(j,i)~=0
-                        %                             beam_splits=beam_splits+1;
-                        %                         end
-                        %                      end
-                        %                      for k=1:beam_splits
-                        panel_to_beam_element(j,i)=panel_to_beam_element(j,i)/sum;
-                    end
-                end
-            end
-            if observer
-                %plotting legend
-                [~,h1]=legend('1','2','3','4');
-               
-                set(h1(6), 'facea', 0.4)
-                set(h1(7), 'facea', 0.25)
-                set(h1(7), 'faceColor', 'y')
-                set(h1(8), 'facea', 0.25)
-                set(h1(8), 'faceColor', 'r')
-			end
-                
+            nBeamEl=size(strGrid,2)-1;
             if obj.symmetric==1
-                n_beam=beam_idx-2;
-                obj.panel_start_idx;
                 offset=length(obj.panels)/2;
                 for j=1:size(obj.panels,2)/2
                     panel_to_beam_element(j+offset+obj.panel_start_idx-1,:)=panel_to_beam_element(j+obj.panel_start_idx-1,:);
                     panel_to_beam_element(j+offset+obj.panel_start_idx-1,[4 9 14])=-panel_to_beam_element(j+offset+obj.panel_start_idx-1,[4 9 14]);
                     for i=1:5:size(panel_to_beam_element,2)
                         if not(panel_to_beam_element(j+offset+obj.panel_start_idx-1,i)==0)
-                            panel_to_beam_element(j+offset+obj.panel_start_idx-1,i)=-panel_to_beam_element(j+offset+obj.panel_start_idx-1,i)+beam_idx;
+                            panel_to_beam_element(j+offset+obj.panel_start_idx-1,i)=-panel_to_beam_element(j+offset+obj.panel_start_idx-1,i)+nBeamEl+1;
 %                             panel_to_beam_element(j+offset+obj.panel_start_idx-1,i+2)=-panel_to_beam_element(j+offset+obj.panel_start_idx-1,i+2);
 %                             panel_to_beam_element(j+obj.panel_start_idx-1,i+2)=-panel_to_beam_element(j+obj.panel_start_idx-1,i+2);
                         end
@@ -1488,12 +1259,13 @@ classdef class_aerosurface
                 for j=1:size(obj.panels,2)/2
                     for i=1:5:size(panel_to_beam_element,2)
                         if not(panel_to_beam_element(j+obj.panel_start_idx-1,i)==0)
-                            com_idx=panel_to_beam_element(j+obj.panel_start_idx-1,i)+beam_idx-1;%+(n_beam-2*(panel_to_beam_element(j+obj.panel_start_idx-1,i)-1));
+                            com_idx=panel_to_beam_element(j+obj.panel_start_idx-1,i)+nBeamEl;%+(n_beam-2*(panel_to_beam_element(j+obj.panel_start_idx-1,i)-1));
                             panel_to_beam_element(j+obj.panel_start_idx-1,i)=com_idx; 
                         end
                     end
                 end
-            end  
+            end 
+            
         end
         
         function obj=T_matrix(obj,panel_to_beam_element,grid,panels,beam)
@@ -1624,7 +1396,7 @@ classdef class_aerosurface
                             r=0.5*(0.75*grid(:,panels(1,idx))+0.25*grid(:,panels(4,idx)))+0.5*(0.75*grid(:,panels(2,idx))+0.25*grid(:,panels(3,idx)));
                             vecb=(0.5*obj.wingbox_coords(:,beam_idx+1,1)+0.5*obj.wingbox_coords(:,beam_idx+1,2))-(0.5*obj.wingbox_coords(:,beam_idx,1)+0.5*obj.wingbox_coords(:,beam_idx,2));
                             theta=cross(vecb,r-rb)/(norm(r-rb)*norm(vecb));
-                            s=(0.5*obj.wingbox_coords(:,beam_idx+1,1)+0.5*obj.wingbox_coords(:,beam_idx+1,2)) + ((vecb / norm(vecb)) * (r - (0.5*obj.wingbox_coords(:,beam_idx+1,1)+0.5*obj.wingbox_coords(:,beam_idx+1,2)))') * (vecb / norm(vecb));
+                            s=      (0.5*obj.wingbox_coords(:,beam_idx+1,1)+0.5*obj.wingbox_coords(:,beam_idx+1,2))  + ((vecb / norm(vecb)) * (r - (0.5*obj.wingbox_coords(:,beam_idx+1,1)+0.5*obj.wingbox_coords(:,beam_idx+1,2)))'       ) * (vecb / norm(vecb));
 %                                     if theta(3)<0
 %                                         dist=-norm(r-rb);
 %                                     else
@@ -1983,9 +1755,9 @@ classdef class_aerosurface
                     end
                     n = obj.wing_segments(i).nBeamelements;
                 else
-                    if n<3
-                        n=3;
-                    end
+%                     if n<3
+%                         n=3;
+%                     end
                 end
                 %ctr;
 %                 frontspar

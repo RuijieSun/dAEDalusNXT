@@ -147,6 +147,11 @@ classdef class_wingsegment
         % rs_segments: [xsi_root, xsi_tip,  t_web, t_top, t_bottom]
         % where xsi is the normalized chordwise position of the spar.
         structural_properties;
+        %skeleton points ( stored after first computation)
+        skeleton_points
+        %thickness points ( stored after first computation)
+        thickness_points_upper
+        thickness_points_lower
     end
     
     methods (Static)
@@ -687,6 +692,58 @@ classdef class_wingsegment
                 obj.profile_t=load(['airfoil/',airfoil_name_t,'.DAT']);
                 obj.profile_name_t=['airfoil/',airfoil_name_t,'.DAT'];
             end
+            % match coords for upper and lower side
+            %tip
+            nprof_upper_t=obj.profile_t(1,1);
+            nprof_lower_t=obj.profile_t(1,2);
+            coords_upper_t=obj.profile_t(2:1+nprof_upper_t,1);
+            profile_upper_t=obj.profile_t(2:1+nprof_upper_t,2);
+            coords_lower_t=obj.profile_t(2+nprof_upper_t:1+nprof_upper_t+nprof_lower_t,1);
+            profile_lower_t=obj.profile_t(2+nprof_upper_t:1+nprof_upper_t+nprof_lower_t,2);
+            if ~isequal(coords_upper_t,coords_lower_t)
+                new_coords= unique([coords_upper_t; coords_lower_t]);
+                new_upper_t=nakeinterp1(coords_upper_t,profile_upper_t,new_coords);
+                new_lower_t=nakeinterp1(coords_lower_t,profile_lower_t,new_coords);
+                coords_upper_t=new_coords;
+                coords_lower_t=new_coords;
+                profile_upper_t=new_upper_t;
+                profile_lower_t=new_lower_t;
+                %save new profiles in wing_segment
+                nprof_upper_t=length(coords_upper_t);
+                nprof_lower_t=length(coords_lower_t);
+                obj.profile_t(1,1)=nprof_upper_t;
+                obj.profile_t(1,2)=nprof_lower_t;
+                obj.profile_t(2:1+nprof_upper_t,1)=coords_upper_t;
+                obj.profile_t(2:1+nprof_upper_t,2)=profile_upper_t;
+                obj.profile_t(2+nprof_upper_t:1+nprof_upper_t+nprof_lower_t,1)=coords_lower_t;
+                obj.profile_t(2+nprof_upper_t:1+nprof_upper_t+nprof_lower_t,2)=profile_lower_t;
+            end
+            
+            %root
+            nprof_upper_r=obj.profile_r(1,1);
+            nprof_lower_r=obj.profile_r(1,2);
+            coords_upper_r=obj.profile_r(2:1+nprof_upper_r,1);
+            profile_upper_r=obj.profile_r(2:1+nprof_upper_r,2);
+            coords_lower_r=obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,1);
+            profile_lower_r=obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,2);
+            if ~isequal(coords_upper_r,coords_lower_r)
+                new_coords= unique([coords_upper_r; coords_lower_r]);
+                new_upper_r=nakeinterp1(coords_upper_r,profile_upper_r,new_coords);
+                new_lower_r=nakeinterp1(coords_lower_r,profile_lower_r,new_coords);
+                coords_upper_r=new_coords;
+                coords_lower_r=new_coords;
+                profile_upper_r=new_upper_r;
+                profile_lower_r=new_lower_r;
+                %save new profiles in wing_segment
+                nprof_upper_r=length(coords_upper_r);
+                nprof_lower_r=length(coords_lower_r);
+                obj.profile_r(1,1)=nprof_upper_r;
+                obj.profile_r(1,2)=nprof_lower_r;
+                obj.profile_r(2:1+nprof_upper_r,1)=coords_upper_r;
+                obj.profile_r(2:1+nprof_upper_r,2)=profile_upper_r;
+                obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,1)=coords_lower_r;
+                obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,2)=profile_lower_r;
+            end
         end
         
         function obj=compute_parameters_from_coords(obj)
@@ -1030,6 +1087,28 @@ classdef class_wingsegment
                 
                 obj.xyz_sp_device(1,:,:)=[p1, p2, p3, p4];
             end
+            if and(obj.has_te_cs,obj.has_sp_cs)
+                % in case the  spoiler overlaps the trailing edge
+                % device, check if the hingeline is nearly the same. if so,
+                % invoke a common hingeline
+                % if overlap on both sides is less than 3% of the chord of the
+                % spoiler, then merge with trailing edge device
+
+                % inner distance between spoiler and te hinge normed to inner
+                % spoiler chord:
+                innerHingeDistance=norm(obj.xyz_sp_device(:,:,1)-obj.xyz_te_device(:,:,1));
+                innerSpoilerChord= norm(obj.xyz_sp_device(:,:,1)-obj.xyz_sp_device(:,:,4));
+                outerHingeDistance=norm(obj.xyz_sp_device(:,:,2)-obj.xyz_te_device(:,:,2));
+                outerSpoilerChord= norm(obj.xyz_sp_device(:,:,2)-obj.xyz_sp_device(:,:,3));
+                innerHingeDistNormed=innerHingeDistance/innerSpoilerChord;
+                outerHingeDistNormed=outerHingeDistance/outerSpoilerChord;
+                
+                if and(innerHingeDistNormed<0.03, outerHingeDistNormed<0.03)
+                    disp('warning: very small panel at overlap between spoiler and trailing edge control surface. This will create problems with the unsteady aerodynamics model.');
+                    obj.xyz_sp_device(:,:,1:2)=obj.xyz_te_device(:,:,1:2);
+                end
+            end
+            
         end
         
         function obj=compute_xyz_fixed(obj)
@@ -1173,18 +1252,20 @@ classdef class_wingsegment
         end
         
         function obj=plot_segment(obj)
-            
+            color1=[16 112 80]./255;
+            color2=[85 217 12]./255;
+            color3=[2 35 28]./255;
             if ~isempty(obj.te_device)
                 for i=1:length(obj.c_te_device)
                     if ~obj.te_device.is_sym_defl
                         obj.te_device.delta=obj.te_device.delta_l_r(1);
                     end
                     obj=obj.compute_controlsurface_coordinates();
-                    handle=fill3(squeeze(obj.xyz_te_device(i,1,:))',squeeze(obj.xyz_te_device(i,2,:))',squeeze(obj.xyz_te_device(i,3,:))','b');
+                    handle=fill3(squeeze(obj.xyz_te_device(i,1,:))',squeeze(obj.xyz_te_device(i,2,:))',squeeze(obj.xyz_te_device(i,3,:))',color1);
                     alpha(handle,0.4)
                     if obj.symmetric==1
                         if obj.te_device.is_sym_defl
-                            handle=fill3(squeeze(obj.xyz_te_device(i,1,:))',-squeeze(obj.xyz_te_device(i,2,:))',squeeze(obj.xyz_te_device(i,3,:))','b');
+                            handle=fill3(squeeze(obj.xyz_te_device(i,1,:))',-squeeze(obj.xyz_te_device(i,2,:))',squeeze(obj.xyz_te_device(i,3,:))',color1);
                             alpha(handle,0.4)
                         else
 %                             obj.te_device.delta
@@ -1192,7 +1273,7 @@ classdef class_wingsegment
 %                             zw=obj.te_device.delta(1);
                             obj.te_device.delta=obj.te_device.delta_l_r(2)*-1;
                             obj=obj.compute_controlsurface_coordinates();
-                            handle=fill3(squeeze(obj.xyz_te_device(i,1,:))',-squeeze(obj.xyz_te_device(i,2,:))',squeeze(obj.xyz_te_device(i,3,:))','b');
+                            handle=fill3(squeeze(obj.xyz_te_device(i,1,:))',-squeeze(obj.xyz_te_device(i,2,:))',squeeze(obj.xyz_te_device(i,3,:))',color1);
                             alpha(handle,0.4)
                             obj.te_device.delta=obj.te_device.delta_l_r(1);
                             obj=obj.compute_controlsurface_coordinates();
@@ -1203,16 +1284,16 @@ classdef class_wingsegment
             
             if ~isempty(obj.le_device)
                 for i=1:length(obj.c_le_device)
-                    handle=fill3(squeeze(obj.xyz_le_device(i,1,:))',squeeze(obj.xyz_le_device(i,2,:))',squeeze(obj.xyz_le_device(i,3,:))','g');
+                    handle=fill3(squeeze(obj.xyz_le_device(i,1,:))',squeeze(obj.xyz_le_device(i,2,:))',squeeze(obj.xyz_le_device(i,3,:))',color1);
                     alpha(handle,0.4)
                     if obj.symmetric==1
                         if obj.le_device.is_sym_defl
-                            handle=fill3(squeeze(obj.xyz_le_device(i,1,:))',-squeeze(obj.xyz_le_device(i,2,:))',squeeze(obj.xyz_le_device(i,3,:))','g');
+                            handle=fill3(squeeze(obj.xyz_le_device(i,1,:))',-squeeze(obj.xyz_le_device(i,2,:))',squeeze(obj.xyz_le_device(i,3,:))',color1);
                             alpha(handle,0.4);
                         else
                             obj.le_device.delta=obj.le_device.delta*-1;
                             obj=obj.compute_controlsurface_coordinates();
-                            handle=fill3(squeeze(obj.xyz_le_device(i,1,:))',-squeeze(obj.xyz_le_device(i,2,:))',squeeze(obj.xyz_le_device(i,3,:))','g');
+                            handle=fill3(squeeze(obj.xyz_le_device(i,1,:))',-squeeze(obj.xyz_le_device(i,2,:))',squeeze(obj.xyz_le_device(i,3,:))',color1);
                             alpha(handle,0.4);
                             obj.le_device.delta=obj.le_device.delta*-1;
                             obj=obj.compute_controlsurface_coordinates();
@@ -1223,16 +1304,16 @@ classdef class_wingsegment
             
             if ~isempty(obj.sp_device)
                 for i=1:length(obj.c_sp_device)
-                    handle=fill3(squeeze(obj.xyz_sp_device(i,1,:))',squeeze(obj.xyz_sp_device(i,2,:))',squeeze(obj.xyz_sp_device(i,3,:)+0.05)','y');
+                    handle=fill3(squeeze(obj.xyz_sp_device(i,1,:))',squeeze(obj.xyz_sp_device(i,2,:))',squeeze(obj.xyz_sp_device(i,3,:)+0.05)',color2);
                     alpha(handle,0.4)
                     if obj.symmetric==1
                         if obj.sp_device.is_sym_defl
-                            handle=fill3(squeeze(obj.xyz_sp_device(i,1,:))',-squeeze(obj.xyz_sp_device(i,2,:))',squeeze(obj.xyz_sp_device(i,3,:)+0.05)','y');
+                            handle=fill3(squeeze(obj.xyz_sp_device(i,1,:))',-squeeze(obj.xyz_sp_device(i,2,:))',squeeze(obj.xyz_sp_device(i,3,:)+0.05)',color2);
                             alpha(handle,0.4);
                         else
                             obj.sp_device.delta=obj.sp_device.delta*-1;
                             obj=obj.compute_controlsurface_coordinates();
-                            handle=fill3(squeeze(obj.xyz_sp_device(i,1,:))',-squeeze(obj.xyz_sp_device(i,2,:))',squeeze(obj.xyz_sp_device(i,3,:)+0.05)','y');
+                            handle=fill3(squeeze(obj.xyz_sp_device(i,1,:))',-squeeze(obj.xyz_sp_device(i,2,:))',squeeze(obj.xyz_sp_device(i,3,:)+0.05)',color2);
                             alpha(handle,0.4);
                             obj.sp_device.delta=obj.sp_device.delta*-1;
                             obj=obj.compute_controlsurface_coordinates();
@@ -1241,11 +1322,11 @@ classdef class_wingsegment
                 end
             end
             
-            handle=fill3(obj.xyz_fixed(1,:),obj.xyz_fixed(2,:),obj.xyz_fixed(3,:),'r');
+            handle=fill3(obj.xyz_fixed(1,:),obj.xyz_fixed(2,:),obj.xyz_fixed(3,:),color3);
             hold on
             alpha(handle,0.4)
             if obj.symmetric==1
-                handle=fill3(obj.xyz_fixed(1,:),-obj.xyz_fixed(2,:),obj.xyz_fixed(3,:),'r');
+                handle=fill3(obj.xyz_fixed(1,:),-obj.xyz_fixed(2,:),obj.xyz_fixed(3,:),color3);
                 hold on
                 alpha(handle,0.4)
             end
@@ -2560,6 +2641,14 @@ classdef class_wingsegment
             % initializes counter of grid points
             k=1;
             
+                
+            %initialize skeleton and thickness point arrays for ctr1
+            %region in case they are still empty
+            if isempty(obj.skeleton_points)
+                obj.skeleton_points=nan(length(span_spacing),length(chord_spacing_ctr_1));
+                obj.thickness_points_upper=nan(length(span_spacing),length(chord_spacing_ctr_1));
+                obj.thickness_points_lower=nan(length(span_spacing),length(chord_spacing_ctr_1));
+            end
             % iterates over each spanwise station
             for i=1:length(span_spacing)
                 
@@ -2626,7 +2715,6 @@ classdef class_wingsegment
                             end
                             
                             % computes skeleton points
-                            skeleton_point=obj.compute_skeleton_point(relative_chord_pos_le,span_spacing(i));
                             skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos_le,relative_chord_pos_prv,skeleton_point_prv, span_spacing(i));
 
                             skeleton_point=skeleton_point2;
@@ -2685,10 +2773,12 @@ classdef class_wingsegment
                         relative_chord_pos_prv=sum(obj.c_le_device)/(le_taper_correction(i)*c_c)+chord_spacing_ctr_1(j-1)*rel_start_sp(i);
                         skeleton_point_prv=skeleton_point2;
                     end
-                           
-                    skeleton_point=obj.compute_skeleton_point(relative_chord_pos,span_spacing(i));
-                    skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos,relative_chord_pos_prv,skeleton_point_prv, span_spacing(i));
-
+                    if isnan(obj.skeleton_points(i,j))
+                        skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos,relative_chord_pos_prv,skeleton_point_prv, span_spacing(i));
+                        obj.skeleton_points(i,j)=skeleton_point2;
+                    else
+                        skeleton_point2=obj.skeleton_points(i,j);
+                    end
                     skeleton_point=skeleton_point2;
 
 
@@ -2700,7 +2790,15 @@ classdef class_wingsegment
                     
                     grid_flat(:,k)=grid(:,k);
                     if grid3D==1
-                       [lower_point,upper_point]=obj.compute_thickness_point(relative_chord_pos,span_spacing(i));
+                        if isnan(obj.thickness_points_upper(i,j))
+                           [lower_point,upper_point]=obj.compute_thickness_point(relative_chord_pos,span_spacing(i));
+                           obj.thickness_points_upper(i,j)=upper_point;
+                           obj.thickness_points_lower(i,j)=lower_point;
+                        else
+                            lower_point=obj.thickness_points_upper(i,j);
+                            upper_point=obj.thickness_points_lower(i,j);
+                        end
+                           
                        grid_upper(:,k)=grid(:,k);
                        grid_lower(:,k)=grid(:,k);
                        grid_upper(2,k)=grid(2,k)-upper_point*sind(obj.dihed);
@@ -2758,7 +2856,6 @@ classdef class_wingsegment
                                 grid(:,k)=r1+chord_spacing_sp(ii)*(te_surface_LE - xsi_sp_LE_arr(i))/(obj.sp_device.hinge * sp_taper_correction(i))*(r2-r1);
                             end
                             
-                            skeleton_point=obj.compute_skeleton_point(relative_chord_pos,span_spacing(i));  
                             skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos,relative_chord_pos_prv,skeleton_point_prv,span_spacing(i));  
 
                             skeleton_point=skeleton_point2;
@@ -2806,7 +2903,6 @@ classdef class_wingsegment
                             skeleton_point_prv=skeleton_point2;
                         end
 
-                        skeleton_point=obj.compute_skeleton_point(relative_chord_pos,span_spacing(i));
 
                         skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos,relative_chord_pos_prv,skeleton_point_prv, span_spacing(i));
 
@@ -2904,7 +3000,6 @@ classdef class_wingsegment
                             
                             
                             
-                            skeleton_point=obj.compute_skeleton_point(relative_chord_pos,span_spacing(i));  
                             skeleton_point2=obj.compute_skeleton_point_new(relative_chord_pos,relative_chord_pos_prv,skeleton_point_prv,span_spacing(i));  
 
                             skeleton_point=skeleton_point2;
@@ -3031,18 +3126,27 @@ classdef class_wingsegment
             coords_lower_t=obj.profile_t(2+nprof_upper_t:1+nprof_upper_t+nprof_lower_t,1);
             profile_lower_t=obj.profile_t(2+nprof_upper_t:1+nprof_upper_t+nprof_lower_t,2);
             if ~isequal(coords_upper_t,coords_lower_t)
-                lower_xOld=coords_lower_t;
-                lower_yOld=profile_lower_t;
-                profile_lower_t=[];
-                coords_lower_t=coords_upper_t;
-                for iPoint=1:length(coords_upper_t)
-                    profile_lower_t(iPoint,1)=nakeinterp1(lower_xOld,lower_yOld,coords_lower_t(iPoint));
-                end
+                new_coords= unique([coords_upper_t; coords_lower_t]);
+                new_upper_t=nakeinterp1(coords_upper_t,profile_upper_t,new_coords);
+                new_lower_t=nakeinterp1(coords_lower_t,profile_lower_t,new_coords);
+                coords_upper_t=new_coords;
+                coords_lower_t=new_coords;
+                profile_upper_t=new_upper_t;
+                profile_lower_t=new_lower_t;
+                %save new profiles in wing_segment
+                nprof_upper_t=length(coords_upper_t);
+                nprof_lower_t=length(coords_lower_t);
+                obj.profile_t(1,1)=nprof_upper_t;
+                obj.profile_t(1,2)=nprof_lower_t;
+                obj.profile_t(2:1+nprof_upper_t,1)=coords_upper_t;
+                obj.profile_t(2:1+nprof_upper_t,2)=profile_upper_t;
+                obj.profile_t(2+nprof_upper_t:1+nprof_upper_t+nprof_lower_t,1)=coords_lower_t;
+                obj.profile_t(2+nprof_upper_t:1+nprof_upper_t+nprof_lower_t,2)=profile_lower_t;
             end
-                camberline_t=(profile_upper_t+profile_lower_t)/2;
-                coords_camberline_t=coords_lower_t;
-                slope_t=diff(camberline_t)./diff(coords_camberline_t);
-                coords_slope_t=(coords_camberline_t(1:end-1)+coords_camberline_t(2:end))/2;
+            camberline_t=(profile_upper_t+profile_lower_t)/2;
+            coords_camberline_t=coords_lower_t;
+            slope_t=diff(camberline_t)./diff(coords_camberline_t);
+            coords_slope_t=(coords_camberline_t(1:end-1)+coords_camberline_t(2:end))/2;
             slope_pos=3/4*(relative_chord_pos-relative_chord_pos_prv)+relative_chord_pos_prv;
             slope_p_t=nakeinterp1(coords_slope_t,slope_t,slope_pos);
             skeletonPointT=slope_p_t*(relative_chord_pos-relative_chord_pos_prv);
@@ -3055,13 +3159,22 @@ classdef class_wingsegment
             coords_lower_r=obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,1);
             profile_lower_r=obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,2);
             if ~isequal(coords_upper_r,coords_lower_r)
-                lower_xOld=coords_lower_r;
-                lower_yOld=profile_lower_r;
-                coords_lower_r=coords_upper_r;
-                profile_lower_r=[];
-                for iPoint=1:length(coords_upper_r)
-                    profile_lower_r(iPoint,1)=nakeinterp1(lower_xOld,lower_yOld,coords_lower_r(iPoint));
-                end
+                new_coords= unique([coords_upper_r; coords_lower_r]);
+                new_upper_r=nakeinterp1(coords_upper_r,profile_upper_r,new_coords);
+                new_lower_r=nakeinterp1(coords_lower_r,profile_lower_r,new_coords);
+                coords_upper_r=new_coords;
+                coords_lower_r=new_coords;
+                profile_upper_r=new_upper_r;
+                profile_lower_r=new_lower_r;
+                %save new profiles in wing_segment
+                nprof_upper_r=length(coords_upper_r);
+                nprof_lower_r=length(coords_lower_r);
+                obj.profile_r(1,1)=nprof_upper_r;
+                obj.profile_r(1,2)=nprof_lower_r;
+                obj.profile_r(2:1+nprof_upper_r,1)=coords_upper_r;
+                obj.profile_r(2:1+nprof_upper_r,2)=profile_upper_r;
+                obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,1)=coords_lower_r;
+                obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,2)=profile_lower_r;
             end
                 camberline_r=(profile_upper_r+profile_lower_r)/2;
                 coords_camberline_r=coords_lower_r;
@@ -3274,12 +3387,25 @@ classdef class_wingsegment
             profile_upper_r=obj.profile_r(2:1+nprof_upper_r,2);
             coords_lower_r=obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,1);
             profile_lower_r=obj.profile_r(2+nprof_upper_r:1+nprof_upper_r+nprof_lower_r,2);
-            %% TODO: profiles don#t always have same size
+            %% profiles don#t always have same size
+            if or((length(profile_upper_r)~=length(profile_upper_t)),(length(profile_lower_r)~=length(profile_lower_t)))
+                new_coords_upper= unique([coords_upper_r; coords_upper_t]);
+                new_coords_lower= unique([coords_lower_r; coords_lower_t]);
+                profile_upper_r=nakeinterp1(coords_upper_r,profile_upper_r,new_coords_upper);
+                profile_upper_t=nakeinterp1(coords_upper_t,profile_upper_t,new_coords_upper);
+                profile_lower_r=nakeinterp1(coords_lower_r,profile_lower_r,new_coords_upper);
+                profile_lower_t=nakeinterp1(coords_lower_t,profile_lower_t,new_coords_upper);
+                coords_upper_r=new_coords_upper;
+                coords_upper_t=new_coords_upper;
+                coords_lower_r=new_coords_lower;
+                coords_lower_t=new_coords_lower;
+            end
+            
             profile_upper=profile_upper_r*(1-relative_span_pos)+profile_upper_t*relative_span_pos;
             profile_lower=profile_lower_r*(1-relative_span_pos)+profile_lower_t*relative_span_pos;
             
-            coords_upper=coords_upper_r*(1-relative_span_pos)+coords_upper_t*relative_span_pos;
-            coords_lower=coords_lower_r*(1-relative_span_pos)+coords_lower_t*relative_span_pos;
+            coords_upper=coords_upper_r;
+            coords_lower=coords_lower_r;
             
             profile=[[length(profile_upper) coords_upper' coords_lower']; [length(profile_lower) profile_upper' profile_lower']]';
         end

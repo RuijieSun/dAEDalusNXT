@@ -27,6 +27,10 @@ classdef class_control_surface_parent < handle
         panelIds=[];
         %> Aerodynamic Panel Ids of Left Wing (so symmetric)
         panelIdsL=[];
+        %> Aerodynamic Panel Ids uncorrected
+        panelIdsUncorr=[];
+        %> Aerodynamic Panel Ids of Left Wing uncorrected (so symmetric)
+        panelIdsLUncorr=[];
         % Aerodynamic Panel Ids of "special regions" (ig overlap between
         % flap and spoiler)
         panelIds_special=[];
@@ -111,6 +115,9 @@ classdef class_control_surface_parent < handle
         % 3D vector in xyz coorindates representing hinge line. VLM normal
         % vector are rotated around this one whenver they are deflected
         rotation_vect;
+        
+        % fractions for spoiler correction
+        fractions;
     end
 
     methods
@@ -539,11 +546,29 @@ classdef class_control_surface_parent < handle
                 dummy = [dummy, obj.children{i}.panelIdsL];
             end
         end
+                function dummy=get.panelIdsUncorr(obj)
+            dummy = [];
+            for i=1:length(obj.children)
+                dummy = [dummy, obj.children{i}.panelIdsUncorr]; %#ok<*AGROW>
+            end
+        end
         
+        function dummy=get.panelIdsLUncorr(obj)
+            dummy = [];
+            for i=1:length(obj.children)
+                dummy = [dummy, obj.children{i}.panelIdsLUncorr];
+            end
+        end
         function dummy=get.panelIds_special(obj)
             dummy = [];
             for i=1:length(obj.children)
                 dummy = [dummy, obj.children{i}.panelIds_special];
+            end
+        end
+        function dummy=get.fractions(obj)
+            dummy = [];
+            for i=1:length(obj.children)
+                dummy = [dummy, obj.children{i}.fractions];
             end
         end
         

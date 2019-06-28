@@ -336,7 +336,7 @@ classdef class_aircraft
         function obj=compute_force_interpolation_matrix(obj,aircraft_structure)
             obj.panel_to_beam_element=zeros(size(obj.panels,2),15);
             for i=1:length(obj.wings)
-                obj.panel_to_beam_element=obj.wings(i).compute_force_interpolation_matrix(obj.panel_to_beam_element,obj.panels,obj.grid_flat);
+                obj.panel_to_beam_element=obj.wings(i).compute_force_interpolation_matrix(obj.panel_to_beam_element);
             end
             
             for i=1:length(obj.wings)
@@ -1109,14 +1109,14 @@ classdef class_aircraft
             missing=setdiff(min(ptba2(:,1)):max(ptba2(:,1)), ptba2(:,1))';
             ptba2=[ptba2; [missing zeros(length(missing),1),  zeros(length(missing),1)]];
             %plotting also couple of panels before minNo and after maxNo
-            n=10;
+            n=20;
             ptba2=[ptba2; [max(ptba2(:,1))+1:max(ptba2(:,1))+n ; zeros(1,n); zeros(1,n)]'];
             ptba2=[ptba2; [min(ptba2(:,1))-n:min(ptba2(:,1)-1) ; zeros(1,n); zeros(1,n)]'];
 
             for i=1:size(ptba2,1)
                  if any(panelRange==ptba2(i,1))
                      %plot panel and fill according to area ratio
-                     h=fill3(obj.grid(1,obj.panels(:,ptba2(i,1))),obj.grid(2,obj.panels(:,ptba2(i,1))),obj.grid(3,obj.panels(:,ptba2(i,1))),'g');
+                     h=fill3(obj.grid(1,obj.panels(:,ptba2(i,1))),obj.grid(2,obj.panels(:,ptba2(i,1))),obj.grid(3,obj.panels(:,ptba2(i,1))),'r');
                      set(h,'facealpha',ptba2(i,3))
                  end
             end
@@ -1126,6 +1126,9 @@ classdef class_aircraft
             for iWing=1:length(obj.wings)
                 obj.wings(iWing)=obj.wings(iWing).computeControlSurfacePanelIds();
             end
+            % correct spoilers piecewise linear
+            
+%             obj=obj.correctSpoilers('PL');
         end
         function obj = computeHingeMoments(obj, F)
             for iWing=1:length(obj.wings)
@@ -1191,6 +1194,59 @@ classdef class_aircraft
                     if  ~isequal(round(obj.wings(iWing).wing_segments(iSeg-1).c_t,10),round(obj.wings(iWing).wing_segments(iSeg).c_r,10))
                         fprintf('Warning: nonsmooth chord transition between segment %i and segment %i on wing %i \n',iSeg-1,iSeg, iWing)
                         pass=0;
+                    end
+                end
+            end
+        end
+        function obj = correctSpoilers(obj,type)
+            for iCs=1:length(obj.control_surfaces_parents)
+                if obj.control_surfaces_parents(iCs).pos==2 %only spoilers
+                    for iChild=1:length(obj.control_surfaces_parents(iCs).children)
+                        spoilerPanelIds=obj.control_surfaces_parents(iCs).children{iChild}.panelIds;
+                        panelsOnSpoiler=find(diff(spoilerPanelIds)~=1,1);
+                        panelsPerStrip=diff(spoilerPanelIds(panelsOnSpoiler:panelsOnSpoiler+1))-1+panelsOnSpoiler;
+                        panelsBehindSpoiler=find(obj.is_te(spoilerPanelIds(panelsOnSpoiler)+1:spoilerPanelIds(panelsOnSpoiler+1)));
+                        panelsBeforeSpoiler=panelsPerStrip-panelsOnSpoiler-panelsBehindSpoiler;
+
+                        newPanelIds=spoilerPanelIds(1)-panelsBeforeSpoiler:spoilerPanelIds(end)+panelsBehindSpoiler;
+
+                        spoilerPanelIdsL=obj.control_surfaces_parents(iCs).children{iChild}.panelIdsL;
+                        newPanelIdsL=spoilerPanelIdsL(1)-panelsBeforeSpoiler:spoilerPanelIdsL(end)+panelsBehindSpoiler;
+                        nStrips=length(spoilerPanelIds)/panelsOnSpoiler;
+                        nPanelsPerStrip=length(newPanelIds)/nStrips;
+                        if strcmp(type,'PC') % piecewise constant correction
+                            factors=[-0.075,1.1,.5];
+                            fractionPerStrip=[factors(1)*ones(panelsBeforeSpoiler,1); factors(2)*ones(panelsOnSpoiler,1); factors(3)*ones(panelsBehindSpoiler,1)];
+                            obj.control_surfaces_parents(iCs).children{iChild}.fractions=repmat(fractionPerStrip,nStrips,1);
+                        elseif strcmp(type,'PL') % picewise linear correction
+                            factors=[-0.075 -0.225 1.1 0.5];
+                            fractions=zeros(length(newPanelIds),1);
+                            for iStrip=1:nStrips
+                                % panel ids for this strip
+                                panIdx=newPanelIds((iStrip-1)*nPanelsPerStrip+1:iStrip*nPanelsPerStrip);
+                                % get local positions of leading edge, spoiler
+                                % leading edge, spoiler trailing edge and
+                                % trailing edge
+                                xPos=[  (obj.grid(1,obj.panels(1,panIdx(1)))+obj.grid(1,obj.panels(2,panIdx(1))))/2 ,...
+                                        (obj.grid(1,obj.panels(1,panIdx(panelsBeforeSpoiler+1)))+obj.grid(1,obj.panels(2,panIdx(panelsBeforeSpoiler+1))))/2 ,...
+                                        (obj.grid(1,obj.panels(1,panIdx(panelsBeforeSpoiler+panelsOnSpoiler+1)))+obj.grid(1,obj.panels(2,panIdx(panelsBeforeSpoiler+panelsOnSpoiler+1))))/2,...
+                                        (obj.grid(1,obj.panels(3,panIdx(end)))+obj.grid(1,obj.panels(4,panIdx(end))))/2];
+                                % x values for picewise linear function
+                                xApprox=[xPos(1) xPos(2)-(xPos(3)-xPos(2))/2 (xPos(2)+xPos(3))/2 xPos(4)];
+                                xApprox=[xPos(1) xPos(2)-(xPos(3)-xPos(2)) (xPos(2)+xPos(3))/2 xPos(4)];
+
+                                % x coordinates of boundary condition
+                                % application points of this strip
+                                rdwnX=0.5*(obj.grid(1,obj.panels(2,panIdx))+obj.grid(1,obj.panels(1,panIdx)))*0.25+0.5*(obj.grid(1,obj.panels(3,panIdx))+obj.grid(1,obj.panels(4,panIdx)))*0.75;
+                                fractions((iStrip-1)*nPanelsPerStrip+1:iStrip*nPanelsPerStrip)=interp1(xApprox,factors,rdwnX,'linear','extrap');
+                            end
+                            obj.control_surfaces_parents(iCs).children{iChild}.fractions=fractions;
+
+                        end
+                        obj.control_surfaces_parents(iCs).children{iChild}.panelIdsUncorr=obj.control_surfaces_parents(iCs).children{iChild}.panelIds;
+                        obj.control_surfaces_parents(iCs).children{iChild}.panelIdsLUncorr= obj.control_surfaces_parents(iCs).children{iChild}.panelIdsL;
+                        obj.control_surfaces_parents(iCs).children{iChild}.panelIds=newPanelIds;
+                        obj.control_surfaces_parents(iCs).children{iChild}.panelIdsL=newPanelIdsL;
                     end
                 end
             end

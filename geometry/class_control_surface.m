@@ -26,6 +26,10 @@ classdef class_control_surface < handle% &  matlab.mixin.SetGetExactNames
         panelIds;
         %> Aerodynamic Panel Ids of Left Wing (so symmetric)
         panelIdsL;
+        %> Aerodynamic Panel Ids Uncorrected
+        panelIdsUncorr=[];
+        %> Aerodynamic Panel Ids of Left Wing Uncorrected (so symmetric)
+        panelIdsLUncorr=[];
         % Aerodynamic Panel Ids of "special regions" (ig overlap between
         % flap and spoiler)
         panelIds_special;
@@ -108,6 +112,8 @@ classdef class_control_surface < handle% &  matlab.mixin.SetGetExactNames
         child_ixd;
         % index wing-segment where instance is contained
         seg_idx;
+        % fractions
+        fractions=[];
     end
     
     methods
