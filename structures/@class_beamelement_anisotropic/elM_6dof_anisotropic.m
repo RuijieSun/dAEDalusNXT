@@ -35,7 +35,7 @@ function obj=elM_6dof_anisotropic(obj)
     J=obj.J;
     
     if obj.is_fueled
-        rho_fuel=obj.ref_parent_beam.fuel_density;
+        rho_fuel=obj.fuel_density;
         obj.el_fuel_vol=obj.A_enclosed*obj.le;
         m=obj.m+obj.A_enclosed*rho_fuel;
     else

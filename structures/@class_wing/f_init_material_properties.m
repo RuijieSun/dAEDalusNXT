@@ -64,38 +64,64 @@ switch anisotropic_flag
         % well
         
         if obj.is_sym == 1
+            lengths=[obj.beamelement(1:obj.nel/2).le];
+            stations=(cumsum([0 lengths(1:end-1)])+cumsum(lengths))/2;
+            stations=[stations stations(end:-1:1)];
+            if and(~isempty(layup_settings.stringersDensityRoot),~isempty(layup_settings.stringersDensityTip))
+                stringerDensities=interp1([0 sum(lengths)*2],[layup_settings.stringersDensityTip layup_settings.stringersDensityRoot],stations);
+            end
             for i=1:obj.nel/2
                 
                 obj.fuel_density=structure.fuel_density;
+                % set local stringer density
+                if and(~isempty(layup_settings.stringersDensityRoot),~isempty(layup_settings.stringersDensityTip))
+                    layup_settings.stringersDensity=stringerDensities(i);
+                end
                 
                 % All the material related information is stored within
                 % crosssection objects, since it will vary depending on the
                 % particular skin or spar we are looking at
+                
                 obj.beamelement(i).crosssection=obj.beamelement(i).crosssection.setMaterial(structure,layup_settings);
+                obj.beamelement(i)=obj.beamelement(i).f_calcCrossProp_anisotropic;
             end
 
             layup_settings_sym = layup_settings;
-            layup_settings_sym.skins_layup_angles = - layup_settings_sym.skins_layup_angles;
+            %layup_settings_sym.skins_layup_angles = -layup_settings_sym.skins_layup_angles; % this is wrong as there is no change in the element coordinate system when going from left wing to right wing
             
             for i=obj.nel/2+1:obj.nel
                 
-                obj.fuel_density=structure.fuel_density;
+                obj.fuel_density=structure.fuel_density;               
+                % set local stringer density
+                if and(~isempty(layup_settings.stringersDensityRoot),~isempty(layup_settings.stringersDensityTip))
+                    layup_settings.stringersDensity=stringerDensities(i);
+                end
                 
                 % All the material related information is stored within
                 % crosssection objects, since it will vary depending on the
                 % particular skin or spar we are looking at
                 obj.beamelement(i).crosssection=obj.beamelement(i).crosssection.setMaterial(structure,layup_settings_sym);
+                obj.beamelement(i)=obj.beamelement(i).f_calcCrossProp_anisotropic;
             end
         
         else
-             for i=1:obj.nel
-                
+            lengths=[obj.beamelement.le];
+            stations=(cumsum([0 lengths(1:end-1)])+cumsum(lengths))/2;
+            if and(~isempty(layup_settings.stringersDensityRoot),~isempty(layup_settings.stringersDensityTip))
+                stringerDensities=interp1([0 sum(lengths)],[layup_settings.stringersDensityRoot layup_settings.stringersDensityTip],stations);
+            end
+            for i=1:obj.nel
+
                 obj.fuel_density=structure.fuel_density;
-                
+
+                if and(~isempty(layup_settings.stringersDensityRoot),~isempty(layup_settings.stringersDensityTip))
+                    layup_settings.stringersDensity=stringerDensities(i);
+                end
                 % All the material related information is stored within
                 % crosssection objects, since it will vary depending on the
                 % particular skin or spar we are looking at
                 obj.beamelement(i).crosssection=obj.beamelement(i).crosssection.setMaterial(structure,layup_settings);
+                obj.beamelement(i)=obj.beamelement(i).f_calcCrossProp_anisotropic;
             end
             
         end

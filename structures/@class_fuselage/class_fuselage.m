@@ -431,31 +431,20 @@ classdef class_fuselage<class_beam
 %            end
           end
          
-         function plot_structure(fuselage,varargin)
+         function plot_structure(fuselage)
 
             hold on
+            
+            t_sk_eq = zeros(1,length(fuselage.beamelement));
             
             for i=1:1:length(fuselage.beamelement) 
               t_sk_eq(i)=cell2mat({fuselage.beamelement(i).crosssection.t_sk_eq});
             end
-            
-            optargin = size(varargin,2);
-            if optargin==2
-                t_min=varargin{2};
-                t_max=varargin{1};
-            else
-                t_max=0;
-                t_min=100;
-                t_max=max([t_sk_eq t_max])
-                t_min=min([t_sk_eq t_min])
-            end
-            
+                        
             aux_points=linspace(0,2*pi,18)';
 
             for i=1:length(fuselage.beamelement)
-                
-                col_i=(t_sk_eq(i)-t_min)/(t_max-t_min);
-                
+               
                 [r]=fuselage.beamelement(i).crosssection.get_dimensions();
               
                 cy=r*cos(aux_points);
@@ -469,7 +458,7 @@ classdef class_fuselage<class_beam
                 y_rear=ones(18,1)*fuselage.node_coords(i+1,2)+cy;
                 z_rear=ones(18,1)*fuselage.node_coords(i+1,3)+cz;
                 
-                surface([x_front x_rear],[y_front y_rear],[z_front z_rear],ones(18,2)*col_i);
+                surface([x_front x_rear],[y_front y_rear],[z_front z_rear],ones(18,2)*t_sk_eq(i));
             end
             
             axis equal

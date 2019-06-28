@@ -4,6 +4,7 @@
 %          and Simon Binder (simon.binder@tum.de)
 % 
 % This file is part of dAEDalusNXT (https://github.com/seyk86/dAEDalusNXT)
+% Partly taken from https://github.com/sbind/JointTool/tree/master/ext/prOOteus/structures 
 %
 function obj = cross_sectional_modeler(obj)
 % constants
@@ -19,52 +20,31 @@ Is(1,2)= 1;Is(2,3)= 1;
 % modeler paper for more info)
 ndof = 4;
 
-% array with nr of nodes of each element. INTERSECTIONS ARE NOT ELIMINATED
-nr_nodes_arr = [obj.fs_nodes_nr, obj.sk_up_nodes_nr, obj.rs_nodes_nr, obj.sk_lo_nodes_nr];
-
-% yz_coords_tot contains an extra point (starting and end point are the
-% same). Used to make loops in elmvar_reduced easier
-yz_coords_tot = [obj.fs_nodes_yz(1:end-1,:);obj.sk_up_nodes_yz;obj.rs_nodes_yz(2:end-1,:);obj.sk_lo_nodes_yz];
-
-% comment out when lam validation not running
-%     display('laminate validation code active');
-%     yz_coords_tot = yz_coords_tot(1:end-1,:);
-
-
-% calculates the total nr of DOFs within the cross section
-dof_max = ndof*(size(yz_coords_tot,1)-1); %1 node is lost ONLY AT INTERSECTION BETWEEN FS AND LO SK;
-
-% comment out when lam validation not running
-%     display('laminate validation code active');
-%     dof_max = dof_max + ndof;
-
-
 % Nr of shell elements within the cross section
-Ne_tot = size(yz_coords_tot,1)-1; %1 node is lost ONLY AT INTERSECTION BETWEEN FS AND LO SK;
+Ne = size(obj.elements,1);
+
+% Nr of nodes within the cross section
+Nn = size(obj.nodes_yz,1);
+
+% calculates the total nr of DOFs within the cross section, i.e. total
+% amount of unique nodes times ndof
+dof_max = ndof*Nn;
 
 
-% Element 1  = front spar
-% Element 2  = upper skin
-% Element 3  = rear spar
-% Element 4  = lower skin
-% (The above is intended as elements of the wingbox, NOT AS FEM (shell) ELEMENTS
 
 
 % runs assemble function. This function initializes the matrices and
 % data necessary to run the actual modeller
-[F,H0,K00,H1,K10,B0,G,shell_id_arr] = assemble(Ne_tot,dof_max,obj,Ne_tot,yz_coords_tot,nr_nodes_arr);
+[F,H0,K00,H1,K10,B0,G] = assemble(Ne,dof_max,obj);
 % Looping over all elements, see comments above for Element idx meaning
 
-% The IDs of the shell elements created within "assemble" are stored
-% within the cross section object.
-obj.shell_id_arr = shell_id_arr;
 
 
 % creates arrays with constrained DOFs and free DOFs
 dof_tot       = 1:dof_max; %total dof
 
 % Clamping a whole node in order to avoid singular stiffness matrix.
-node_clamped  = 1; %constrained node ID (this node refers to the beam-element node, so the Euler Bernoulli 1D beam node)
+node_clamped  = 1; %constrained node ID 
 dof_clamped   = (node_clamped-1)*ndof+1:ndof*node_clamped;%constrained dof array
 dof_free      = setdiff(dof_tot,dof_clamped); % free dof array
 
@@ -72,10 +52,9 @@ dof_free      = setdiff(dof_tot,dof_clamped); % free dof array
 % first order approximation of warping w0 and Euler stiffness matrix
 V0 = zeros(size(H0));
 V0(dof_free,:) = -K00(dof_free,dof_free)\H0(dof_free,:);
-
+%euler bernoulli beam elements
 obj.Se = F+H0'*V0; % Euler: modulus/stiffness matrix
 obj.Se = (obj.Se+obj.Se')/2; %Symmetrize
-
 % second order approximation of warping w1 and the Timoshenko stiffness matrix
 % (for the moment these are not used, but they will turn out to be useful if we upgrade the
 % Daedalus beam model from an Euler Bernoulli one to a Timoshenko one).
@@ -88,39 +67,27 @@ obj.Ce =  obj.Se\eye(4);                     %Euler: compliance/flexibility matr
 obj.Cs =  E*obj.Ce*(V1'*H1b+P'*obj.Ce*P)*obj.Ce*E';  %Shear: compliance of the shear stiffness components
 obj.Ces = obj.Ce*P*obj.Ce*E';                    %Coupling: euler-shear forces
 
+C6 = Ie'*obj.Ce*Ie+Is'*obj.Cs*Is-(Ie'*obj.Ces*Is+Is'*obj.Ces'*Ie); % Timoshenko: compliance/flexibility matrix
+
+S6 = C6\eye(6);  % Timoshenko: modulus/stiffness matrix
+obj.S6 = (S6+S6')/2; %Symmetrize
 %% Normalized strain variation over cross-section: Gamma = Gamma_hat*epsilon
 
 % This is matrix used to recover the shell strains from the Nodal deflections
 obj.Gamma_euler = (G+B0*V0);
 
-%     obj.Gamma_euler = (G+B0*V0)*obj.Ce;
+% This is matrix used to recover the shell strains from the reaction forces
+Gamma_euler2 = (G+B0*V0)*obj.Ce;
 
 % The 2 matrices below are not used for now. If we upgrade to a Timoshenko model, they will be needed
-obj.Gamma_shear = (B0*V1-obj.Gamma_euler*P)*obj.Ce;
-obj.Gamma       = obj.Gamma_euler*Ie+obj.Gamma_shear*E'*Is; %strain across cross-seaction
+obj.Gamma_shear = (B0*V1-Gamma_euler2*P)*obj.Ce;
+obj.Gamma       = Gamma_euler2*Ie+obj.Gamma_shear*E'*Is; %strain across cross-seaction
 
-
-%     % second order approximation of warping w1 and the Timoshenko stiffness matrix
-    V1 = zeros(size(H0));
-    H1b = H1+K10*V0;
-    V1(dof_free,:) = K00(dof_free,dof_free)\(H1b(dof_free,:));
-
-    P=H0'*V1;
-    obj.Ce =  obj.Se\eye(4);                     %Euler: compliance/flexibility matrix
-    obj.Cs =  E*obj.Ce*(V1'*H1b+P'*obj.Ce*P)*obj.Ce*E';  %Shear: compliance of the shear stiffness components
-    obj.Ces = obj.Ce*P*obj.Ce*E';                    %Coupling: euler-shear forces
-
-    C6 = Ie'*obj.Ce*Ie+Is'*obj.Cs*Is-(Ie'*obj.Ces*Is+Is'*obj.Ces'*Ie); % Timoshenko: compliance/flexibility matrix
-
-    S6 = C6\eye(6);  % Timoshenko: modulus/stiffness matrix
-    S6 = (S6+S6')/2; %Symmetrize
 end
 
 % This function initializes the matrices and data necessary to run the actual modeller
-function [F,H0,K00,H1,K10,B0,G,shell_id_arr] = assemble(Ne,dof,obj,Ne_tot,yz_coords_tot,nr_nodes_arr)
+function [F,H0,K00,H1,K10,B0,G] = assemble(Ne,dof,obj)
 
-%dof per node, see ndof in cross_sectional_modeller for comments
-ndof = 4;
 
 K00 = zeros(dof,dof);
 H0  = zeros(dof,4);
@@ -129,66 +96,36 @@ K10 = zeros(dof,dof);
 F   = zeros(4,4);
 R   = zeros(dof,6); % maxtrix where the columns are the 6 ridig body modes of a cross-section
 
-B0  = zeros(6*Ne_tot,dof); %B0 matrix of all elements
-G   = zeros(6*Ne_tot,4); %G matrix for all elements
+B0  = zeros(6*Ne,dof); %B0 matrix of all elements
+G   = zeros(6*Ne,4); %G matrix for all elements
 L   = 0;
-
-% creates an array with the element indices. Each entry in
-% node_idx_arr_final signals the shell element index belonging to the
-% last shell element of that particular skin or spar. Starting point is
-% the bottom element of the front spar, ending point is the right-most
-% element of the bottom skin, direction is anti-clockwise (looking from
-% the tip towards the root of the beam).
-node_idx_arr = [nr_nodes_arr(1), nr_nodes_arr(2) - 1, nr_nodes_arr(3) - 1, nr_nodes_arr(4) - 1];
-node_idx_arr_final = cumsum(node_idx_arr);
 
 % looping through all shell elements within the cross section
 for el = 1:Ne
-    
-        elmdof = [(el-1)*ndof+1:ndof*el,((el+1)-1)*ndof+1:ndof*(el+1)];  % DOFs associated with nodes of shell element "el"
-        nelm = 6*(el-1)+1:6*el;  % Indices of strains associated with current element (DOFs of element itselfm useful for strain recovery)
-    
-        %temporary for laminate validation
-%         
-%         el_ABD = obj.sk_up_ABD;
-%         yz_el_loc = yz_coords_tot(el:el+1,:);
-% %         if el==Ne
-% %             elmdof = [(el-1)*ndof+1:ndof*el,1:ndof];%local dof of element:el
-% %         end
-
-
-        % original code, to comment out for laminate validation
-        
-    % Checks if current element is the last one, in which case the
-    % elmdof formula is different, sicne we are looking at the LAST and
-    % FIRST nodes.
-    if el==Ne
-        elmdof = [(el-1)*ndof+1:ndof*el,1:ndof];% DOFs associated with nodes of shell element "el"
-    end
+    node1Id=obj.elements(el,2);
+    node2Id=obj.elements(el,3);
+    elmdof = [(node1Id-1)*4+1:node1Id*4 (node2Id-1)*4+1:node2Id*4 ];  % DOFs associated with nodes of shell element "el"
+    nelm = 6*(el-1)+1:6*el;  % Indices of strains associated with current element (DOFs of element itselfm useful for strain recovery)
+ 
 
     % yz coords (cross sectional modeller coord sys) of both nodes of
     % current shell element
-    yz_el_loc = yz_coords_tot(el:el+1,:);
+    yz_el_loc = obj.nodes_yz([node1Id, node2Id],:);
     
     % if statements below determine if current element belongs to fs,
     % sk_up, rs or sk_lo. Depending on the result, the corresponding
     % ABD_stiff stiffness matrix is assigned to the el_ABD variable. The
     % shell_id_arr corresponding to the current element is also saved within an array.
-    if el < node_idx_arr_final(1)
+    if obj.elements(el,4)==1
         el_ABD = obj.laminate_fs.ABD_stiff;
-            shell_id_arr(el) = 1;
-        
-    elseif el < node_idx_arr_final(2)
+    elseif obj.elements(el,4)==2
         el_ABD = obj.laminate_sk_up.ABD_stiff;
-            shell_id_arr(el) = 2;
-        
-    elseif el < node_idx_arr_final(3)
+    elseif obj.elements(el,4)==3
         el_ABD = obj.laminate_rs.ABD_stiff;
-            shell_id_arr(el) = 3;
-        
-    elseif el < node_idx_arr_final(4)
+    elseif obj.elements(el,4)==4
         el_ABD = obj.laminate_sk_lo.ABD_stiff;
-            shell_id_arr(el) = 4;
+    elseif obj.elements(el,4)==5
+        el_ABD = obj.laminate_st.ABD_stiff;
     end
     
     %run the function that calculates local properties, assembling all

@@ -98,9 +98,11 @@ classdef class_wing < class_beam
         % add later: direction of g (now in fixed in -z direction)
         
         %> local y coordinate runlength of wing from root to tip
-        wing_frontview_length=0;       
+        wing_frontview_length=0;      
         
-
+        % rib locations along the beam axis [0:1]
+        ribLocations=[];
+        
     end
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Class Methods
@@ -118,7 +120,7 @@ classdef class_wing < class_beam
          % returns deflections at quarter chord line of wing ( for
          % aerodynamic mesh morphing )
          function struct_deflections=f_get_deflections_c4(obj)
-            struct_deflections.def=obj.nodal_deflections_c4'; 
+            struct_deflections.def=obj.nodal_deflections_c4; 
          end
          
          function struct_deflections=f_get_deflections(obj)
@@ -147,6 +149,29 @@ classdef class_wing < class_beam
              obj.load_factor=state.load_factor;
              obj.loadcase_index=state.loadcase_index;
              obj.landingimpact=0;
+         end
+         
+         function obj=f_init_ribLocations(obj, locations)
+             if obj.is_sym
+                 obj.ribLocations=([-locations(end:-1:2) locations]+1)/2;
+                 beamElLengths=[obj.beamelement(:).le];
+                 beamNodes=cumsum([0 beamElLengths])/sum(beamElLengths);
+             else
+                obj.ribLocations=locations;
+                beamElLengths=[obj.beamelement(:).le];
+                beamNodes=cumsum([0 beamElLengths])/sum(beamElLengths);
+             end
+             
+             % set bay info to elements
+             for iEl=1:length(obj.beamelement)
+                 %find ribs belonging to buckling bays considered in this
+                 %element
+                 idx1=find(obj.ribLocations>beamNodes(iEl),1,'first')-1;
+                 idx2=find(obj.ribLocations<beamNodes(iEl+1),1,'last')+1;
+                 % rib locations relative to beam element nodes normed to
+                 % beam element length; =0 means node 1; =1 means node 2; 
+                 obj.beamelement(iEl).ribLocations=interp1(beamNodes(iEl:iEl+1),[0 1],obj.ribLocations(idx1:idx2),'linear','extrap');
+             end
          end
          
          plot_critical_case_idx(wing,varargin);
@@ -243,12 +268,12 @@ classdef class_wing < class_beam
             
             for i=1:length(wing.beamelement)    
                 if add_eigenmass
-                    T=wing.beamelement(i).f_rotVec(0,wing.gamma,0);  % transformations matrix from NED to aerodynamic system
+                    T=eye(3);  % transformations matrix from NED to aerodynamic system
                     qmrot(1:3,i)=T*[0,0,wing.beamelement(i).qm]';%wing.beamelement(i).qm];           % distributed loading due to eigenmass in x,y,z coordinates
                 end
                 
                 if add_fuelmass
-                    T=wing.beamelement(i).f_rotVec(0,wing.gamma,0);  % transformations matrix from NED to aerodynamic system
+                    T=eye(3);  % transformations matrix from NED to aerodynamic system
                     qfrot(:,i)=T*[0;0;wing.beamelement(i).qf];           % distributed loading due to eigenmass in x,y,z coordinates
                 end
             end
@@ -356,7 +381,7 @@ classdef class_wing < class_beam
                col=xcol(1);
                tr=xcol(2);
             end
-
+            
             midp=zeros(3,1);
             for i=1:1:length(wing.beamelement)
                 for j=1:3
@@ -373,140 +398,8 @@ classdef class_wing < class_beam
             end
             axis equal
             grid on
-         end  
-         
-         function plot_structure(wing,varargin)
-            mycolormap=jet(256);
-            hold on
-            midp=zeros(3,1);
-            mid_def=zeros(3,1);
-            mid_rot=zeros(3,1);
-            norm_def=wing.nodal_deflections;
-                for i=1:1:length(wing.beamelement) 
-                    t_sk_up(i)=cell2mat({wing.beamelement(i).crosssection.t_sk_up});
-                    t_sk_lo(i)=cell2mat({wing.beamelement(i).crosssection.t_sk_lo});
-                    t_sp_fr(i)=cell2mat({wing.beamelement(i).crosssection.t_sp_fr});
-                    t_sp_re(i)=cell2mat({wing.beamelement(i).crosssection.t_sp_re});
-                end
-            
-            optargin = size(varargin,2);
-            if optargin==2
-                t_min=varargin{2};
-                t_max=varargin{1};
-            else
-                 t_max=0;
-                t_min=100;
-                tk=[t_sk_lo t_sk_up t_sp_fr t_sp_re];
-                t_max=max([tk t_max]);
-                t_min=min([tk t_min]);
-            end
-            
-            for i=1:1:length(wing.beamelement)
-                
-                for j=1:3
-                    midp(j)=(wing.node_coords(i+1,j)+wing.node_coords(i,j))/2;
-                                        mid_def(j)=(norm_def(j+6*(i-1))+norm_def(6+j+6*(i-1)))/2;
-                    mid_rot(j)=(wing.nodal_deflections(3+j+6*(i-1))+wing.nodal_deflections(9+j+6*(i-1)))/2;
-                end
-                
-                mid_rot=wing.beamelement(i).T(1:3,1:3)'*mid_rot;
-                midp_defl=[midp(1)+mid_def(1),midp(2)+mid_def(2),midp(3)+mid_def(3)]';
-                
-                
-                h=wing.beamelement(i).crosssection.h;
-                w=wing.beamelement(i).crosssection.w;
-                le=wing.beamelement(i).le;
-                nu=wing.beamelement(i).nu;
-                sweep=wing.beamelement(i).phi*0;
-                le=wing.beamelement(i).le*cos(wing.beamelement(i).phi);
-                twist=wing.beamelement(i).epsilon;
-
-                col_i=min(round((t_sk_lo(i)-t_min)*255/(t_max-t_min)+1),255);
-                colidx(i,1)=col_i;
-                col=ones(8,1)*mycolormap(col_i,:);
-                
-                a=-wing.beamelement(i).nu;
-                b=-wing.beamelement(i).epsilon;
-                %lower skin
-                plotcube([midp(1),midp(2)-h/2*sin(a),midp(3)-h/2*cos(a)],[w,le,t_sk_lo(i)],[nu,twist,sweep],ones(8,1)*col_i/255,1,1);
-               
-                
-                % front spar
-                col_i=min(round((t_sp_fr(i)-t_min)*255/(t_max-t_min)+1),255);
-                colidx(i,2)=col_i;
-                col=ones(8,1)*mycolormap(col_i,:);
-                
-                % rot=wing.nodal_deflections((i-1)*wing.el_ndof+4:(i-1)*wing.el_ndof+6);
-                
-
-                c=0;
-              
-                Lx=[1       0       0
-                0   cos(a)  sin(a)
-                0   -sin(a) cos(a)];
-
-                Ly=[cos(b) 0 -sin(b)
-                0      1    0
-                sin(b)  0   cos(b)];
-
-
-                M=Ly*Lx;
-                
-                diff=[-w/2 0 0];
-                
-                xxx=M*diff';
-
-                plotcube([midp(1)+xxx(1),midp(2)+xxx(2),midp(3)+xxx(3)],[t_sp_fr(i),le,h],[nu,twist,sweep],ones(8,1)*col_i/255,1,1);
-                %rear spar
-                
-                diff=[w/2 0 0];
-                xxx=M*diff';
-                col_i=min(round((t_sp_re(i)-t_min)*255/(t_max-t_min)+1),255);
-                plotcube([midp(1)+xxx(1),midp(2)+xxx(2),midp(3)+xxx(3)],[t_sp_re(i),le,h],[nu,twist,sweep],ones(8,1)*col_i/255,1,1);
- 
-                %upper skin
-                col_i=min(round((t_sk_up(i)-t_min)*255/(t_max-t_min)+1),255);
-                col=ones(8,1)*mycolormap(col_i,:);
-                plotcube([midp(1),midp(2)+h/2*sin(a),midp(3)+h/2*cos(a)],[w,le,t_sk_up(i)],[nu,twist,sweep],ones(8,1)*col_i/255,1,1);
-
-            end
-            axis equal
-            grid on
-            
-            if ~isempty(wing.engine)
-                for ii=1:length(wing.engine)
-                     %plot3(wing.engine(ii).cg_pos(1),wing.engine(ii).cg_pos(2),wing.engine(ii).cg_pos(3),'kx','MarkerSize',20);
-
-                            %           find closest node:
-                            dist=zeros(wing.nel,1);
-                            for i=1:wing.nel
-                                dist(i)=sqrt(sum((wing.node_coords(i,2)-wing.engine(ii).cg_pos(2)').^2));
-                            end
-                            [Y,I] = min(dist);
-                            hold on
-                     
-                     plot3([wing.engine(ii).cg_pos(1) wing.node_coords(I,1)],[wing.engine(ii).cg_pos(2) wing.node_coords(I,2)],[wing.engine(ii).cg_pos(3) wing.node_coords(I,3)],'-k','LineWidth',2);
-                     plot3(wing.engine(ii).cg_pos(1),wing.engine(ii).cg_pos(2),wing.engine(ii).cg_pos(3),'-kx','MarkerSize',15,'LineWidth',2);
-                end
-            end
-            
-           if ~isempty(wing.gear)
-                for ii=1:length(wing.gear)
-                     %plot3(wing.engine(ii).cg_pos(1),wing.engine(ii).cg_pos(2),wing.engine(ii).cg_pos(3),'kx','MarkerSize',20);
-
-                            %           find closest node:
-                            dist=zeros(wing.nel,1);
-                            for i=1:wing.nel
-                                dist(i)=sqrt(sum((wing.node_coords(i,2)-wing.gear(ii).pos(2)').^2));
-                            end
-                            [Y,I] = min(dist);
-                            hold on
-                     
-                     plot3([wing.gear(ii).pos(1) wing.node_coords(I,1)],[wing.gear(ii).pos(2) wing.node_coords(I,2)],[wing.gear(ii).pos(3) wing.node_coords(I,3)],'-k','LineWidth',2);
-                     plot3(wing.gear(ii).pos(1),wing.gear(ii).pos(2),wing.gear(ii).pos(3),'-ko','MarkerSize',15,'LineWidth',2);
-                end
-           end
          end
+         
 
          function obj=write_structure_tecplot(wing,fileID,beam_nr)
             
@@ -809,6 +702,9 @@ classdef class_wing < class_beam
                  
                  % Runs the cross sectional modeller for the current beam-element
                  obj.beamelement(i).crosssection = obj.beamelement(i).crosssection.cross_sectional_modeler();
+                 
+                 % initialize buckling
+                 obj.beamelement(i)=obj.beamelement(i).f_init_buckling_panels();
              end
          end
     end  

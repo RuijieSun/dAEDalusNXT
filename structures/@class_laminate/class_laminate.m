@@ -47,6 +47,9 @@ classdef class_laminate
         %% Laminate design envelope properties
         % Material invariants used to solve for feasible design region
         u1;u2;u3;u4;u5;u6;
+        % Material invariants used to solve for feasible design region as
+        % defied by khani
+        u1k;u2k;u3k;u4k;u5k;u6k;
         
         % Failure indices of each skin or spar, indicating how close (or
         % past) failure each skin or spar are. It includes the safety
@@ -64,7 +67,9 @@ classdef class_laminate
         % LAMINATE COORDINATE SYSTEM
         offset_angle;
         
-
+        % Failure envelope formulation (1 for std IJsselmuiden; 2 for
+        % Khani)
+        failureEnvelopeType=2;
     end
     
     methods (Static)
@@ -146,15 +151,18 @@ classdef class_laminate
             nr_ply_min_fraction = 100/min_gcd;
             
 %             nr_ply_req = max(nr_ply_min_thickness, nr_ply_min_fraction);
-            
-            nr_ply_req = ceil(max(nr_ply_min_thickness, nr_ply_min_fraction) / min(nr_ply_min_thickness, nr_ply_min_fraction)) *  min(nr_ply_min_thickness, nr_ply_min_fraction);
-            
+            if 2*nr_ply_min_fraction<nr_ply_min_thickness
+                nr_ply_req = ceil(nr_ply_min_thickness/(2*nr_ply_min_fraction)  ) *(2*nr_ply_min_fraction);
+            else
+                nr_ply_req = 2* nr_ply_min_fraction; % added by simon as the half of the laminate needs to satisfy the fractions
+            end
             % since the laminate has to be symmetric, if the required nr of
             % plies is odd, it has to be multiplied by 2, so that the
             % fraction can still be respected.
-            if mod(nr_ply_req,2) ~= 0
-                nr_ply_req = 2 * (nr_ply_req);
-            end
+            %commented out by simon: multiplication is done previously.
+%             if mod(nr_ply_req,2) ~= 0
+%                 nr_ply_req = 2 * (nr_ply_req);
+%             end
             
             % Since layup is always symmetric, we will only work on upper
             % half, and then mirror it.
@@ -171,8 +179,9 @@ classdef class_laminate
             nr_plies_arr_asc_frac(:,2) = main_list_asc_frac(:,2)*nr_ply_req_symm/100;
             excess_plies = mod(nr_plies_arr_asc_frac(:,2),1);
             
-            % flag indicating which angles need excess plies. Follows order
-            % of nr_plies_arr_asc_frac. The excess ply will be applied in
+            
+            % flag indicating which angles need fat plies. Follows order
+            % of nr_plies_arr_asc_frac. The fat ply will be applied in
             % the form of extra thickness added to the innermost ply of
             % that specific angle in the symmetric layup.
             excess_plies_flag = excess_plies>0;
@@ -180,7 +189,7 @@ classdef class_laminate
             % calculates nr of extra plies that need to be added for
             % perfect representation. These plies will have a thickness
             % different from the standard one.
-            nr_excess_plies = sum(excess_plies>0)/2;
+            nr_excess_plies = 0;% (no plys have to be added as we just increase the thickness) old: sum(excess_plies>0)/2;
             
             
             % final nr of plies required in half the laminate
@@ -191,7 +200,7 @@ classdef class_laminate
             
             % calculate maximum ply thickness and initialize plt thickness array
             t_ply_max_temp = t_laminate/nr_ply_req;
-            t_ply_arr = ones(nr_ply_req_symm_final,1) * t_ply_max_temp;
+            t_ply_arr = ones(nr_ply_req_symm,1) * t_ply_max_temp;
             
             
             % We want to distribute the plies as evenly as possible, while
@@ -209,14 +218,14 @@ classdef class_laminate
 %             nr_least_plies = floor(main_list_asc_frac(1,2)/100 * nr_ply_req_symm_final);
 %             upper_sublaminate_incomplete_flag = mod((main_list_asc_frac(1,2)/100 * nr_ply_req_symm_final),1)>0;
 
-            nr_least_plies = floor(main_list_asc_frac(1,2)/100 * nr_ply_req_symm);
-            upper_sublaminate_incomplete_flag = mod((main_list_asc_frac(1,2)/100 * nr_ply_req_symm),1)>0;
+            nr_least_plies = (main_list_asc_frac(1,2)/100 * nr_ply_req_symm);
+            upper_sublaminate_incomplete_flag = mod(nr_least_plies,1)>0;
             
             
             
             % calculates how many plies of the remaining orientations
             % should be present within each sublaminate
-            arr_plies_sublaminate = floor(nr_plies_arr_asc_frac(:,2) / nr_least_plies);
+            arr_plies_sublaminate = ceil(nr_plies_arr_asc_frac(:,2) / nr_least_plies);
             
             % calculates how many plies to fit between plies with smallest
             % fraction, so as to evenly distribute them.
@@ -321,6 +330,22 @@ classdef class_laminate
                     end
                 end
             end
+            %change simon:
+            % if the length is more than required, remove respective values
+            % so that fractions match
+            
+            while length(generated_layup)>sum(nr_plies_arr_asc_frac(:,2))
+                %get actual fractions
+                actFrac=sum(generated_layup==input_angles)/length(generated_layup);
+                %compare fractions to desired fractions
+                devFrac=actFrac./input_fractions*100-1 ;
+                %remove last entry of fraction with largest deviation
+                angleToRemove=input_angles(find(devFrac==max(devFrac),1,'first'));
+                
+                generated_layup(find(generated_layup==angleToRemove,1,'last'))=[];
+            end
+            
+            
             
             % creates the array with the final layup angles
             final_layup = [generated_layup(end:-1:1);generated_layup];
@@ -366,7 +391,7 @@ classdef class_laminate
         
         % material_properties_input is an array which should have the
         % following form: [E_x, E_y, mu_xy, mu_yx, G_xy, ply_thicness]
-        function obj = class_laminate(angle_lst_deg_in, ply_properties_input, ply_thick_array, design_envelope_u_arr, offset_angle)
+        function obj = class_laminate(angle_lst_deg_in, ply_properties_input, ply_thick_array, design_envelope_u_arr,design_envelope_u_arr_khani, offset_angle)
 
             % saving input layup and flipping the sign. Sign inversion done
             % for internal purposes, the final result is the correct one
@@ -394,6 +419,13 @@ classdef class_laminate
             obj.u4 = design_envelope_u_arr(4);
             obj.u5 = design_envelope_u_arr(5);
             obj.u6 = design_envelope_u_arr(6);
+            %khani invariants
+            obj.u1k = design_envelope_u_arr_khani(1);
+            obj.u2k = design_envelope_u_arr_khani(2);
+            obj.u3k = design_envelope_u_arr_khani(3);
+            obj.u4k = design_envelope_u_arr_khani(4);
+            obj.u5k = design_envelope_u_arr_khani(5);
+            obj.u6k = design_envelope_u_arr_khani(6);
             
             % saving offset angle
             obj.offset_angle = offset_angle;
@@ -566,71 +598,159 @@ classdef class_laminate
         % assumes that ALL LAMINATES WITHIN THE CROSS SECTION ARE MADE OF
         % THE SAME PLY MATERIAL.
         
-        function obj = calculate_safety_factor(obj, strain_in, safety_factor_input)
+        function obj = calculate_safety_factor(obj, strain_in, strain_in_endA, strain_in_endB, safety_factor_input)
             
-            obj.fail_idx_crit = zeros(size(strain_in,2),1);
             
-            % calculating failure indices for the provided strain array
-            for i=1:1:size(strain_in,2)
-               I1 =  strain_in(1,i) + strain_in(2,i); % volumetric strain invariant
-               I2 =  sqrt(((strain_in(1,i)-strain_in(2,i))/2)^2 + strain_in(3,i)^2 ); % maximum shear strain
-               if and((I1==0),(I2==0)) % no strains
-                   critical_safety_factor=Inf;
-               else
-                   % calculating coefficients to solve the 2nd and 4th order
-                   % polynomial equations (to find fail index)
-                   a10 = obj.u4^2 + 4*obj.u1 - 4*obj.u6;
-                   a11 = -4*obj.u2 * I1 * (obj.u1 - obj.u6) + 2 * obj.u4 * obj.u5 * I1;
-                   a12 = 4*obj.u6^2 * I2^2 - 4*obj.u3 * I1^2 * (obj.u1 - obj.u6) - 4 * obj.u6 * obj.u1 * I2^2 + obj.u5^2 * I1^2;
-                   a20 = 1;
-                   a21 = -2*obj.u2 * I1;
-                   a22 = -2*obj.u3 * I1^2 + obj.u2^2 * I1^2 - I2^2 * (obj.u4^2 + 2*obj.u1);
-                   a23 = 2*obj.u2 * I1^3 * obj.u3 - I2^2 * (2*obj.u4 * obj.u5 * I1 - 2*obj.u1 * obj.u2 * I1);
-                   a24 = obj.u1^2 * I2^4 - I2^2 * (obj.u5^2 * I1^2 - 2*obj.u1 * obj.u3 * I1^2) + obj.u3^2 * I1^4;
+            critical_safety_factor_arr=zeros(2,size(strain_in,2));
+                            
+            C0=-(1/4)*obj.u6k^2/obj.u4k-1;
+            C1=-(1/2)*obj.u3k*obj.u6k/obj.u4k+obj.u5k;
+            C11=-(1/4)*obj.u3k^2/obj.u4k+obj.u1k+obj.u2k;
+            C12=obj.u1k-(1/4)*obj.u3k^2/obj.u4k;
+            
+            
+            if obj.failureEnvelopeType==1
 
-                   % 1st and 2nd roots, from 2nd order polynomial
-                   root_1 = (-a11 + sqrt(a11^2 - 4 * (a12 * a10))) / (2 * a12);
-                   root_2 = (-a11 - sqrt(a11^2 - 4 * (a12 * a10))) / (2 * a12);
+                for i=1:1:size(strain_in,2)
+                    I1 =  strain_in(1,i) + strain_in(2,i); % volumetric strain invariant
+                    I2 =  sqrt(((strain_in(1,i)-strain_in(2,i))/2)^2 + strain_in(3,i)^2 ); % maximum shear strain
+                    if and((I1==0),(I2==0)) % no strains
+                       critical_safety_factor=Inf;
+                    else
+                        obj.fail_idx_crit = zeros(size(strain_in,2),1);
+                        % calculating failure indices for the provided strain array
+                        % according to IJsselmuiden 2008
+                        % calculating coefficients to solve the 2nd and 4th order
+                        % polynomial equations (to find fail index)
+                        a10 = obj.u4^2 + 4*obj.u1 - 4*obj.u6;
+                        a11 = -4*obj.u2 * I1 * (obj.u1 - obj.u6) + 2 * obj.u4 * obj.u5 * I1;
+                        a12 = 4*obj.u6^2 * I2^2 - 4*obj.u3 * I1^2 * (obj.u1 - obj.u6) - 4 * obj.u6 * obj.u1 * I2^2 + obj.u5^2 * I1^2;
+                        a20 = 1;
+                        a21 = -2*obj.u2 * I1;
+                        a22 = -2*obj.u3 * I1^2 + obj.u2^2 * I1^2 - I2^2 * (obj.u4^2 + 2*obj.u1);
+                        a23 = 2*obj.u2 * I1^3 * obj.u3 - I2^2 * (2*obj.u4 * obj.u5 * I1 - 2*obj.u1 * obj.u2 * I1);
+                        a24 = obj.u1^2 * I2^4 - I2^2 * (obj.u5^2 * I1^2 - 2*obj.u1 * obj.u3 * I1^2) + obj.u3^2 * I1^4;
 
-                   % 3rd to 6th roots, from 4th order polynomial
-                   if any(isnan([a24,a23,a22,a21,a20]))
-                        root_arr=[Inf,Inf,Inf,Inf];
-                   elseif any(isinf([a24,a23,a22,a21,a20]))
-                        root_arr=[Inf,Inf,Inf,Inf];
-                   else
-%                         root_arr = roots([a24,a23,a22,a21,a20]);
-                        a = diag(ones(1,3),-1);
-                        a(1,:) = -[a23,a22,a21,a20]./a24;
-                        root_arr = eig(a);
-                   end
-                   root_3 = root_arr(1);
-                   root_4 = root_arr(2);
-                   root_5 = root_arr(3);
-                   root_6 = root_arr(4);
+                        % 1st and 2nd roots, from 2nd order polynomial
+                        root_1 = (-a11 + sqrt(a11^2 - 4 * (a12 * a10))) / (2 * a12);
+                        root_2 = (-a11 - sqrt(a11^2 - 4 * (a12 * a10))) / (2 * a12);
 
-                   % storing all roots in an array
-                   safety_factor_array = [root_1,root_2,root_3,root_4,root_5,root_6];
+                        % 3rd to 6th roots, from 4th order polynomial
+                        if any(isnan([a24,a23,a22,a21,a20]))
+                            root_arr=[Inf,Inf,Inf,Inf];
+                        elseif any(isinf([a24,a23,a22,a21,a20]))
+                            root_arr=[Inf,Inf,Inf,Inf];
+                        else
+                        %                         root_arr = roots([a24,a23,a22,a21,a20]);
+                            a = diag(ones(1,3),-1);
+                            a(1,:) = -[a23,a22,a21,a20]./a24;
+                            root_arr = eig(a);
+                        end
+                        root_3 = root_arr(1);
+                        root_4 = root_arr(2);
+                        root_5 = root_arr(3);
+                        root_6 = root_arr(4);
 
-                   % The smallest of all positive roots is the critical safety
-                   % factor (if equal to 1, on the verge of failure, smaller
-                   % than 1 = failure, bigger than 1 = safe).
-                   critical_safety_factor = min(safety_factor_array(safety_factor_array>0));
-               end
-               % Saving the critical safety factor of this shell element in
-               % an array. Incorporating safety factor of this cross
-               % section within the failure index.
-%                fail_idx_arr(i) = -(critical_safety_factor/safety_factor_input - 1);
-               
-               obj.fail_idx_arr(i) = (1/(critical_safety_factor/safety_factor_input)^2 - 1);
+                        % storing all roots in an array
+                        safety_factor_array = [root_1,root_2,root_3,root_4,root_5,root_6];
+
+                        % The smallest of all positive roots is the critical safety
+                        % factor (if equal to 1, on the verge of failure, smaller
+                        % than 1 = failure, bigger than 1 = safe).
+                        critical_safety_factor = min(safety_factor_array(safety_factor_array>0));
+                        % Saving the critical safety factor of this shell element in
+                        % an array. Incorporating safety factor of this cross
+                        % section within the failure index.
+                        %                fail_idx_arr(i) = -(critical_safety_factor/safety_factor_input - 1);
+
+                        obj.fail_idx_arr(i) = (1/(critical_safety_factor/safety_factor_input)^2 - 1);
+                    end
+                end
+            elseif obj.failureEnvelopeType==2  
+                for i=1:1:size(strain_in,2)
+                    I1 =  strain_in(1,i) + strain_in(2,i); % volumetric strain invariant
+                    I2 =  sqrt(((strain_in(1,i)-strain_in(2,i))/2)^2 + strain_in(3,i)^2 ); % maximum shear strain
+                    if and((I1==0),(I2==0)) % no strains
+                       critical_safety_factor=Inf;
+                    else
+                        % calculating failure indices for the provided strain array
+                        % according to A. Khani 2011 (check also phd thesis
+                        % in tudelft repository)
+                        %constants
+                        for iEnd=1:2
+
+                            %strains
+                            if iEnd==1
+                                ex=strain_in_endA(1,i);
+                                ey=strain_in_endA(2,i);
+                                gamma=strain_in_endA(3,i);
+                            elseif iEnd==2
+
+                                ex=strain_in_endB(1,i);
+                                ey=strain_in_endB(2,i);
+                                gamma=strain_in_endB(3,i);
+                            end
+
+                            %mohr circle eq
+                            eavg=(ex+ey)/2; %average
+                            R=sqrt(((ex-ey)/2)^2+(gamma/2)^2); %radius
+
+                            %principal strains
+                            e1=eavg+R;
+                            e2=eavg-R;
+
+                            % this is from phd thesis of khani
+                            a10=C0;
+                            a11=C1*e1+C1*e2;
+                            a12=C11*e1^2+C11*e2^2+2*C12*e1*e2;
+
+                            % 1st and 2nd roots, from 2nd order polynomial
+                            root_1 = (-a11 + sqrt(a11^2 - 4 * a12 * a10)) / (2 * a10);
+                            root_2 = (-a11 - sqrt(a11^2 - 4 * a12 * a10)) / (2 * a10);
+
+                            % storing all roots in an array
+                            safety_factor_array = 1./[root_1,root_2];
+
+                            % The smallest of all positive roots is the critical safety
+                            % factor (if equal to 1, on the verge of failure, smaller
+                            % than 1 = failure, bigger than 1 = safe).
+                            critical_safety_factor_arr(iEnd,i) = min(safety_factor_array(safety_factor_array>0));
+
+
+                        end
+                    end
+                end
             end
-            
-           % Saving the most critical safety factor AMONG ALL SHELL
-           % ELEEMNTS in an array.
-           %fail_idx_crit = max(fail_idx_arr);
-           obj.fail_idx_crit = max(obj.fail_idx_arr);
-            
+            obj.fail_idx_arr=(1./(critical_safety_factor_arr/safety_factor_input).^2 -1);
+
+            % Saving the most critical safety factor AMONG ALL SHELL
+            % ELEEMNTS in an array. Todo, KS-aggregation
+            if obj.failureEnvelopeType==1
+                obj.fail_idx_crit = max(obj.fail_idx_arr);
+            elseif obj.failureEnvelopeType==2
+                obj.fail_idx_crit = constAgg(obj.fail_idx_arr(:),500);
+            end
         end
         
+        function obj = calculate_safety_factor_from_princ(obj,e1,e2,sf, aggregationFactor)
+            C0=-(1/4)*obj.u6k^2/obj.u4k-1;
+            C1=-(1/2)*obj.u3k*obj.u6k/obj.u4k+obj.u5k;
+            C11=-(1/4)*obj.u3k^2/obj.u4k+obj.u1k+obj.u2k;
+            C12=obj.u1k-(1/4)*obj.u3k^2/obj.u4k;
+            
+            a10=C0;
+            
+            a11=C1*e1+C1*e2;
+            a12=C11*e1.^2+C11*e2.^2+2*C12*e1.*e2;
+            
+            % 1st and 2nd roots, from 2nd order polynomial
+            root_Part =sqrt(a11.^2 - 4 * a12 .* a10) ;
+            rootArr=(([-a11-root_Part, -a11+root_Part])/(2*a10));
+            % storing all roots in an array
+            rootArr2=1./rootArr;
+            obj.fail_idx_arr=(1./(rootArr2(rootArr2>0)/sf).^2 -1);
+            obj.fail_idx_crit = constAgg(obj.fail_idx_arr(:),aggregationFactor);
+        end
         
         function obj = update_laminate(obj)
             
@@ -652,6 +772,7 @@ classdef class_laminate
             % Saving material invariants of old laminate (needed for
             % design envelope)
             u_arr = [obj.u1, obj.u2, obj.u3, obj.u4, obj.u5, obj.u6];
+            u_arr_khani = [obj.u1k, obj.u2k, obj.u3k, obj.u4k, obj.u5k, obj.u6k];
             
             
             % Saving new offset angle (the new value should have been set
@@ -659,7 +780,7 @@ classdef class_laminate
             offset_angle_in = obj.offset_angle;
             
             
-            obj = obj.execute_laminate_update(original_layup, ply_properties, thickness_arr, u_arr, offset_angle_in);
+            obj = obj.execute_laminate_update(original_layup, ply_properties, thickness_arr, u_arr,u_arr_khani, offset_angle_in);
 
         end
         
@@ -670,7 +791,7 @@ classdef class_laminate
         % PROPERTIES (BOTH BELONGING TO LAMINATE OBJECTS) NEED TO HAVE BEEN
         % SET TO THE UPDATED VALUES DETERMINED BY THE OPTIMIZATION PROCESS.
         % THE FUNCTION SHOULD BE CALLED FROM ITS CROSS SECTION PARENT.
-        function obj = execute_laminate_update(obj,angle_lst_deg_in, ply_properties_input, ply_thick_array, design_envelope_u_arr, offset_angle)
+        function obj = execute_laminate_update(obj,angle_lst_deg_in, ply_properties_input, ply_thick_array, design_envelope_u_arr,design_envelope_u_arr_khani, offset_angle)
            
             % saving input layup and flipping the sign. Sign inversion done
             % for internal purposes, the final result is the correct one
@@ -697,6 +818,12 @@ classdef class_laminate
             obj.u4 = design_envelope_u_arr(4);
             obj.u5 = design_envelope_u_arr(5);
             obj.u6 = design_envelope_u_arr(6);
+            obj.u1k = design_envelope_u_arr_khani(1);
+            obj.u2k = design_envelope_u_arr_khani(2);
+            obj.u3k = design_envelope_u_arr_khani(3);
+            obj.u4k = design_envelope_u_arr_khani(4);
+            obj.u5k = design_envelope_u_arr_khani(5);
+            obj.u6k = design_envelope_u_arr_khani(6);
             
             % calls next function
             obj = obj.laminate_maker(); 

@@ -164,6 +164,13 @@ classdef class_beam < matlab.mixin.Heterogeneous
         %> to identify the current loadcase
         loadcase_index; 
         
+        %% safety factor for optim.
+        
+        %> switch to compute or not safety factor
+        calcul_failIdx = 1;
+        
+        %> list of beamelem that need safety factor computed
+        beam_element_failIdx;
         
         %% dynamic solution results
         modeshapes;
@@ -220,6 +227,8 @@ classdef class_beam < matlab.mixin.Heterogeneous
              obj.nodal_loads=zeros(obj.nel*obj.el_ndof+obj.el_ndof,1);
              obj.nodal_loads_def=zeros(obj.nel*obj.el_ndof+obj.el_ndof,1);
              obj.nodal_masses=zeros((obj.nel+1),7);
+             
+             obj.beam_element_failIdx = 1:nel;
              % only required for non-linear elements... possibly
              % differentiate later
              if ischar(crosssections)
@@ -332,21 +341,36 @@ classdef class_beam < matlab.mixin.Heterogeneous
          % modeller)
          function obj = f_calc_stress_strain_crossmod(obj)
              ndof_node=obj.el_ndof;
-             % loops through all beam elements
-             for i = 1:length(obj.beamelement)
-                 
-                 % saves nodal deflections of start and end node of current
-                 % beam element
-                 if isa(obj, 'class_wing')
-                    loc_nodal_deflection_input = obj.beamelement(i).nodal_deflections_loc;
-                 elseif isa(obj, 'class_beam')
-                    loc_nodal_deflection_input = obj.nodal_deflections(1 + ndof_node*(i-1): ndof_node*(i+1));
+             % loops through all beam elements to compute stress and
+             % strains
+             if obj.calcul_failIdx == 0
+                 for i = 1:length(obj.beamelement)
+                     % saves nodal deflections of start and end node of current
+                     % beam element
+                     if isa(obj, 'class_wing')
+                         loc_nodal_deflection_input = obj.beamelement(i).nodal_deflections_loc;
+                     elseif isa(obj, 'class_beam')
+                         loc_nodal_deflection_input = obj.nodal_deflections(1 + ndof_node*(i-1): ndof_node*(i+1));
+                     end
+                     
+                     % compute strains only
+                     obj.beamelement(i) = obj.beamelement(i).f_calc_strain_crossmod(loc_nodal_deflection_input,ndof_node);
                  end
-
-                 % calls the f_calc_stress_strain_crossmod at beam-element level
-                 obj.beamelement(i) = obj.beamelement(i).f_calc_stress_strain_crossmod(loc_nodal_deflection_input,ndof_node);
                  
+             else
+                 for i=1:length(obj.beam_element_failIdx)
+                      if isa(obj, 'class_wing')
+                         loc_nodal_deflection_input = obj.beamelement(obj.beam_element_failIdx(i)).nodal_deflections_loc;
+                     elseif isa(obj, 'class_beam')
+                         loc_nodal_deflection_input = obj.nodal_deflections(1 + ndof_node*(obj.beam_element_failIdx(i)-1): ndof_node*(obj.beam_element_failIdx(i)+1));
+                     end
+                     
+                     % compute strains & stress at beam element level
+                     obj.beamelement(obj.beam_element_failIdx(i)) = obj.beamelement(obj.beam_element_failIdx(i)).f_calc_strain_crossmod(loc_nodal_deflection_input,ndof_node);
+                     obj.beamelement(obj.beam_element_failIdx(i)) = obj.beamelement(obj.beam_element_failIdx(i)).f_calc_safety_factor();
+                 end
              end
+             
          end
          
          
@@ -356,8 +380,8 @@ classdef class_beam < matlab.mixin.Heterogeneous
              obj.node_coords(:,3)=obj.node_coords(:,3)+obj.r_Ref(3);
          end
          
-        % =================================================================
-        %> @brief calls the solver
+         % =================================================================
+         %> @brief calls the solver
         %>
         %> @param eval_nonlin flag for linear or nonlinear evaluation
         %>  (0=linear, 1=nonlinear)
@@ -465,7 +489,16 @@ classdef class_beam < matlab.mixin.Heterogeneous
             obj.modefrequencies = (1./sqrt(diag(omega2)))/(2*pi); % Since inverse iteration is used in determining matrix A
 
         end
-         
+        
+        function obj=f_solve_buckl(obj)
+            if isa(obj,'class_wing')
+                for iEl = 1:obj.nel
+                    if isa(obj.beamelement(iEl),'class_beamelement_anisotropic')
+                        obj.beamelement(iEl)=obj.beamelement(iEl).f_solve_buckl();
+                    end
+                end
+            end
+        end
         % loops over all beam elements in order to save their respective
         % nodal deflections within each specfic beam-element class instance
         % (after solving the linear system, the solution used to only be
@@ -1093,6 +1126,22 @@ classdef class_beam < matlab.mixin.Heterogeneous
                 for i=1:obj.nel
                     obj.beamelement(i).nodal_deflections_loc=zeros(2*obj.el_ndof,1); 
                 end  
+         end
+         
+         function obj=plotBucklingReserveFactors(obj)
+             
+             figure; 
+             hold on;
+             for iEl=1:length(obj.beamelement)
+                 obj.beamelement(iEl).f_plot_bucklingReserveFactors(obj.node_coords(iEl,:));
+             end
+         end
+         function obj=plotStrains(obj)
+             figure;
+             hold on;
+             for iEl=1:length(obj.beamelement)
+                 obj.beamelement(iEl).f_plot_strains(obj.node_coords(iEl,:));
+             end
          end
          
     end  

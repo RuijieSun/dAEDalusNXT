@@ -50,6 +50,9 @@ classdef class_material_anisotropic
         
         % Material invariants used to sovlve for feasible design region
         u1;u2;u3;u4;u5;u6;
+        % Material invariants used to sovlve for feasible design region
+        % as defined by khani
+        u1k;u2k;u3k;u4k;u5k;u6k;
     end
     
     methods
@@ -64,8 +67,12 @@ classdef class_material_anisotropic
         %> @return instance of class_material
         % =================================================================
        
-        function obj =class_material_anisotropic(material_string)
-
+        function obj =class_material_anisotropic(material_string,varargin)
+            if length(varargin)==1
+                kdf=varargin{1};
+            else
+                kdf=1;
+            end
 %             if strcmp('CFRP_0/90_QI',material_string)
 %                 % Mech. properties taken from
 %                 % http://www.performance-composites.com/carbonfibre/mechanicalproperties_2.asp
@@ -116,19 +123,19 @@ classdef class_material_anisotropic
 
                 obj.t_ply = 0.000127;
 
-                obj.ult_sigma_tens_1 = 2280.0E6;
-                obj.ult_sigma_tens_2 = 57.0E6;
+                obj.ult_sigma_tens_1 = 2280.0E6*kdf;
+                obj.ult_sigma_tens_2 = 57.0E6*kdf;
 
-                obj.ult_sigma_comp_1 = 1440.0E6;
-                obj.ult_sigma_comp_2 = 228.0E6;
+                obj.ult_sigma_comp_1 = 1440.0E6*kdf;
+                obj.ult_sigma_comp_2 = 228.0E6*kdf;
 
-                obj.ult_tau_shear_12 = 71.0E6;  
+                obj.ult_tau_shear_12 = 71.0E6*kdf;  
             end
             
             if strcmp('CFRP_Werter',material_string)
                 % Used by werter for optimizations with predefined laminate
                 % including knock down factors as specified in his phd
-                % thesis page 210
+                % thesis page 210; see his references for original source
                 obj.E1 = 147.0E9;
                 obj.E2 = 10.3E9;
                 obj.G = 7.0E9;
@@ -139,15 +146,75 @@ classdef class_material_anisotropic
 
                 obj.t_ply = 0.000127;
 
-                obj.ult_sigma_tens_1 = 948.5E6;
-                obj.ult_sigma_tens_2 = 23.7E6;
+                obj.ult_sigma_tens_1 = 2280.0E6*kdf; %2280*0.8*0.8*0.65
+                obj.ult_sigma_tens_2 = 57.0E6*kdf;  %57*0.8*0.8*0.65
 
-                obj.ult_sigma_comp_1 = 717.6E6;
-                obj.ult_sigma_comp_2 = 94.8E6;
+                obj.ult_sigma_comp_1 = 1725.0E6*kdf;%1725*0.8*0.8*0.65
+                obj.ult_sigma_comp_2 = 228.0E6*kdf;%228*0.8*0.8*0.65
 
-                obj.ult_tau_shear_12 = 31.6E6;  
+                obj.ult_tau_shear_12 = 76.0E6*kdf;  %76*0.8*0.8*0.65
             end
+            if strcmp('CFRP_AS4',material_string)
+                % ijsselmuiden
+                obj.E1 = 142.0E9;
+                obj.E2 = 10.3E9;
+                obj.G = 7.2E9;
+                obj.rho = 1600;
+
+                obj.poiss_ratio = 0.27;
+                obj.poiss_ratio_minor = 0.0196; %poiss_ratio/(E1/E2)
+
+                obj.t_ply = 0.000127;
+
+                obj.ult_sigma_tens_1 = 2280E6*kdf; 
+                obj.ult_sigma_tens_2 = 57E6*kdf;  
+
+                obj.ult_sigma_comp_1 = 1440E6*kdf;
+                obj.ult_sigma_comp_2 = 228E6*kdf;
+
+                obj.ult_tau_shear_12 = 71E6*kdf;  
+            end
+             if strcmp('CFRP_IM6',material_string)
+                % ijsselmuiden
+                obj.E1 = 177.0E9;
+                obj.E2 = 10.8E9;
+                obj.G = 7.6E9;
+                obj.rho = 1800;
+
+                obj.poiss_ratio = 0.27;
+                obj.poiss_ratio_minor = 0.0165; %poiss_ratio/(E1/E2)
+
+                obj.t_ply = 0.000127;
+
+                obj.ult_sigma_tens_1 = 2860E6*kdf; 
+                obj.ult_sigma_tens_2 = 49E6*kdf;  
+
+                obj.ult_sigma_comp_1 = 1875E6*kdf;
+                obj.ult_sigma_comp_2 = 246E6*kdf;
+
+                obj.ult_tau_shear_12 = 83E6*kdf; 
+             end
             
+             if strcmp('CFRP_B56',material_string)
+                % ijsselmuiden
+                obj.E1 = 201.0E9;
+                obj.E2 = 21.7E9;
+                obj.G = 5.4E9;
+                obj.rho = 1800;
+
+                obj.poiss_ratio = 0.17;
+                obj.poiss_ratio_minor = 0.0184; %poiss_ratio/(E1/E2)
+
+                obj.t_ply = 0.000127;
+
+                obj.ult_sigma_tens_1 = 1380E6*kdf; 
+                obj.ult_sigma_tens_2 = 56E6*kdf;  
+
+                obj.ult_sigma_comp_1 = 1600E6*kdf;
+                obj.ult_sigma_comp_2 = 125E6*kdf;
+
+                obj.ult_tau_shear_12 = 62.6E6*kdf; 
+             end
             if strcmp('Werter_validation',material_string)
                 % Mech. properties taken from Table 3.2 of Werter's PhD thesis
 
@@ -170,6 +237,30 @@ classdef class_material_anisotropic
                 obj.ult_tau_shear_12 = 70.0E6;  
             end
 
+            if strcmp('Werter_validation_2',material_string)
+                % Mech. properties taken from Table 3.7 of Werter's PhD
+                % thesis (only tply change from Werter_validation)
+
+                obj.E1 = 141.96E9;
+                obj.E2 = 9.79E9;
+                obj.G = 6E9;
+                obj.rho = 1600;
+
+                obj.poiss_ratio = 0.42;
+                obj.poiss_ratio_minor = 0.02896;
+
+                obj.t_ply = 0.00025;
+
+                obj.ult_sigma_tens_1 = 1500.0E6;
+                obj.ult_sigma_tens_2 = 50.0E6;
+
+                obj.ult_sigma_comp_1 = 1200.0E6;
+                obj.ult_sigma_comp_2 = 250.0E6;
+
+                obj.ult_tau_shear_12 = 70.0E6;  
+            end
+            
+            
             if strcmp('aniso_aluminum',material_string)
                 % Mech. properties taken from Table 3.2 of Werter's PhD thesis
 
@@ -244,6 +335,15 @@ classdef class_material_anisotropic
             obj.u4 = G1 - G2;
             obj.u5 = G11 - G22;
             obj.u6 = G66;
+            
+            % Material invariants used to sovlve for feasible design region
+            % as defined by khani
+            obj.u1k = G22-G66/2;
+            obj.u2k = (G66) / 2;
+            obj.u3k = 2*G12 - 2*G22 + G66;
+            obj.u4k = G11-2*G12 +G22- G66; %see paper, not phd thesis of khani
+            obj.u5k = G2;
+            obj.u6k = G1-G2;
             
         end
     end

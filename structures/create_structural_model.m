@@ -25,8 +25,12 @@ for nwings=1:length(aircraft.wings_structural_properties)
     % class_material_anisotropic and sets  anisotropic_flag = 1.
     % Otherwise class_material is run and the anisotropic_flag = 0.
     if strcmp(aircraft.wings_structural_properties(nwings).material(1),'anisotropic')
-        material=class_material_anisotropic(aircraft.addSettings.skins_ply_material); %assumes that spars use same ply material as skin
         anisotropic_flag = 1;
+        if isfield(aircraft.addSettings,'kdf')
+            material=class_material_anisotropic(aircraft.addSettings.skins_ply_material,aircraft.addSettings.kdf);
+        else
+            material=class_material_anisotropic(aircraft.addSettings.skins_ply_material); %assumes that spars use same ply material as skin
+        end
     else
         material=class_material(aircraft.wings_structural_properties(nwings).material(1));
         anisotropic_flag = 0;
@@ -77,6 +81,13 @@ for nwings=1:length(aircraft.wings_structural_properties)
         wingstructure=wingstructure.f_set_fuelingFactor(aircraft.addSettings.wingboxFuelingFactor);
     end
     wingstructure=wingstructure.f_init_structure(aircraft.wings(nwings),aircraft.wings_structural_properties(nwings).is_fueled);
+    
+    % set rib bays
+    if isfield(aircraft.wings_structural_properties(nwings),'ribLocations')
+        if ~isempty(aircraft.wings_structural_properties(nwings).ribLocations)
+            wingstructure=wingstructure.f_init_ribLocations(aircraft.wings_structural_properties(nwings).ribLocations);
+        end
+    end  
     if wingstructure.isExternalFEM==0
         wingstructure=wingstructure.f_init_material_properties(wing_settings, anisotropic_flag, aircraft.addSettings);
         
@@ -248,8 +259,8 @@ for nbc=1:length(aircraft.boundary_conditions)
     dis_min=dis;
     node_idx_1=0;
     node_idx_2=0;
-    for nc_ctr1=1:length(aircraft_structure.beam(idx_1).node_coords)
-         for nc_ctr2=1:length(aircraft_structure.beam(idx_2).node_coords)
+    for nc_ctr1=1:size(aircraft_structure.beam(idx_1).node_coords,1)
+         for nc_ctr2=1:size(aircraft_structure.beam(idx_2).node_coords,1)
             dis=norm(aircraft_structure.beam(idx_1).node_coords(nc_ctr1,:)'-aircraft_structure.beam(idx_2).node_coords(nc_ctr2,:)');
             if dis<dis_min
                dis_min=dis;

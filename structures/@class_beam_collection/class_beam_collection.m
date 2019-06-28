@@ -574,53 +574,138 @@ classdef class_beam_collection
             end
         end
         
-        function obj=plot_structure(obj)
-            t_max=0;
-            t_min=1000;
-            for j=1:1:length(obj.beam)
-                if  isa(obj.beam(j),'class_wing')
-                    
-                    for i=1:1:length(obj.beam(j).beamelement)
-                        t_sk_up(i)=cell2mat({obj.beam(j).beamelement(i).crosssection.t_sk_up});
-                        t_sk_lo(i)=cell2mat({obj.beam(j).beamelement(i).crosssection.t_sk_lo});
-                        t_sp_fr(i)=cell2mat({obj.beam(j).beamelement(i).crosssection.t_sp_fr});
-                        t_sp_re(i)=cell2mat({obj.beam(j).beamelement(i).crosssection.t_sp_re});
-                    end
-                    t_max=max([max(t_sk_up),max(t_sk_lo),max(t_sp_fr),max(t_sp_re),t_max]);
-                    t_min=min([min(t_sk_up),min(t_sk_lo),min(t_sp_fr),min(t_sp_re),t_min]);
-                    
-                elseif isa(obj.beam(j),'class_fuselage')
-                    
-                    for i=1:1:length(obj.beam(j).beamelement)
-                        t_sk_eq(i)=cell2mat({obj.beam(j).beamelement(i).crosssection.t_sk_eq});
-                    end
-                    if sum(t_sk_eq)>0
-                        tk=[t_sk_lo t_sk_up t_sp_fr t_sp_re t_sk_eq];
-                    else
-                        tk=[t_sk_lo t_sk_up t_sp_fr t_sp_re];
-                    end
-                    t_max=max([tk t_max]);
-                    t_min=min([tk t_min]);
-                    
-                end
+        function obj=plot_structure(obj,varargin)
+            if ~isempty(varargin)
+                beamsToPlot=varargin{1};
+            else
+                beamsToPlot=1:length(obj.beam);
             end
-            
-            for i=1:length(obj.beam)
-                if  isa(obj.beam(i),'class_wing')
-                obj.beam(i).plot_structure(t_max,t_min);
+            for i=beamsToPlot
+                if  isa(obj.beam(i),'class_wing') || isempty(obj.beam(i).identifier)
+                    hold on;
+                    
+                    midp=zeros(3,1);
+                    for iBEl = 1:length(obj.beam(i).beamelement)
+                        for j=1:3
+                            if isa(obj.beam(i),'class_wing')
+                                midp(j)=(obj.beam(i).node_coords(iBEl+1,j)+obj.beam(i).node_coords(iBEl,j))/2;
+                            elseif isempty(obj.beam(i).identifier)
+                                midp(j)=(obj.beam(i).node_coords(j,iBEl+1)+obj.beam(i).node_coords(j,iBEl))/2;
+                            end
+                        end
+                        
+                        nu=obj.beam(i).beamelement(iBEl).nu;
+                        twist=obj.beam(i).beamelement(iBEl).epsilon;
+                        sweep=obj.beam(i).beamelement(iBEl).phi;
+                        
+                        h=obj.beam(i).beamelement(iBEl).crosssection.h;
+                        w=obj.beam(i).beamelement(iBEl).crosssection.w;
+                        le=obj.beam(i).beamelement(iBEl).le;
+                        
+                        % plotcube([midp(1),midp(2),midp(3)],[w, le, h],[nu twist sweep],[10 10 10 10 20 20 20 20],1,1);
+                        
+                        Lx=[1       0       0
+                            0   cos(nu)  -sin(nu)
+                            0   sin(nu) cos(nu)];
+                        
+                        Ly=[cos(twist) 0 sin(twist)
+                            0      1    0
+                            -sin(twist)  0   cos(twist)];
+                        
+                        Lz=[cos(sweep) -sin(sweep)   0
+                            sin(sweep) cos(sweep)  0
+                            0           0   1];
+                        
+                        rot_mat=Lx*Ly*Lz;
+                        
+                        %
+                        %       c7---------c8
+                        %      /|          /|
+                        %     c3---------c4 |
+                        %     | |         | |
+                        %     | |         | |
+                        %     | c5--------c6
+                        %     | /         |/
+                        %     c1---------c2
+                        %
+                        %     (c1,c2,c4,c3) : rear spar
+                        %     (c6,c5,c7,c8) : front spar
+                        %     (c3,c4,c8,c7) : upper skin
+                        %     (c1,c2,c6,c5) : lower skin
+                        %
+                        
+                        
+                        c1 =  [midp(1) midp(2) midp(3)]' + rot_mat*[w/2;-le/2;-h/2];
+                        c2 =  [midp(1) midp(2) midp(3)]' + rot_mat*[w/2;le/2;-h/2];
+                        c3 =  [midp(1) midp(2) midp(3)]' + rot_mat*[w/2;-le/2;h/2];
+                        c4 =  [midp(1) midp(2) midp(3)]' + rot_mat*[w/2;le/2;h/2];
+                        c5 =  [midp(1) midp(2) midp(3)]' + rot_mat*[-w/2;-le/2;-h/2];
+                        c6 =  [midp(1) midp(2) midp(3)]' + rot_mat*[-w/2;le/2;-h/2];
+                        c7 =  [midp(1) midp(2) midp(3)]' + rot_mat*[-w/2;-le/2;h/2];
+                        c8 =  [midp(1) midp(2) midp(3)]' + rot_mat*[-w/2;le/2;h/2];
+                        
+                        if obj.beam(i).beamelement(iBEl).anisotropic
+                            
+                            fill3([c1(1) c2(1) c4(1) c3(1)],[c1(2) c2(2) c4(2) c3(2)],[c1(3) c2(3) c4(3) c3(3)],obj.beam(i).beamelement(iBEl).crosssection.laminate_rs.t_lam); %plot rear spar with color relative to thickness
+                            fill3([c6(1) c5(1) c7(1) c8(1)],[c6(2) c5(2) c7(2) c8(2)],[c6(3) c5(3) c7(3) c8(3)],obj.beam(i).beamelement(iBEl).crosssection.laminate_fs.t_lam); %plot front spar
+                            fill3([c3(1) c4(1) c8(1) c7(1)],[c3(2) c4(2) c8(2) c7(2)],[c3(3) c4(3) c8(3) c7(3)],obj.beam(i).beamelement(iBEl).crosssection.laminate_sk_up.t_lam); %plot upper skin
+                            fill3([c1(1) c2(1) c6(1) c5(1)],[c1(2) c2(2) c6(2) c5(2)],[c1(3) c2(3) c6(3) c5(3)],obj.beam(i).beamelement(iBEl).crosssection.laminate_sk_lo.t_lam); %plot lower skin
+                            
+                            yz_fspar = stripes([-le/2 -le/2 le/2 le/2; -h/2 h/2 h/2 -h/2],obj.beam(i).beamelement(iBEl).crosssection.laminate_fs.offset_angle,6+1i);
+                            yz_rspar = stripes([-le/2 -le/2 le/2 le/2; -h/2 h/2 h/2 -h/2],obj.beam(i).beamelement(iBEl).crosssection.laminate_rs.offset_angle,6+1i);
+                            xy_uskin = stripes([-w/2 -w/2 w/2 w/2; -le/2 le/2 le/2 -le/2],obj.beam(i).beamelement(iBEl).crosssection.laminate_sk_up.offset_angle+90,6+1i);
+                            xy_lskin = stripes([-w/2 -w/2 w/2 w/2; -le/2 le/2 le/2 -le/2],-obj.beam(i).beamelement(iBEl).crosssection.laminate_sk_lo.offset_angle+90,6+1i);
+                            
+                            for k = 1:length(yz_fspar(1,:,1))
+                                coords_beg_rs = [w/2; yz_rspar(1,k,1); yz_rspar(1,k,2)];
+                                coords_end_rs = [w/2; yz_rspar(2,k,1); yz_rspar(2,k,2)];
+                                coords_beg_fs = [-w/2; yz_fspar(1,k,1); yz_fspar(1,k,2)];
+                                coords_end_fs = [-w/2; yz_fspar(2,k,1); yz_fspar(2,k,2)];
+                                coords_beg_us = [xy_uskin(1,k,1); xy_uskin(1,k,2); h/2];
+                                coords_end_us = [xy_uskin(2,k,1); xy_uskin(2,k,2); h/2];
+                                coords_beg_ls = [xy_lskin(1,k,1); xy_lskin(1,k,2); -h/2];
+                                coords_end_ls = [xy_lskin(2,k,1); xy_lskin(2,k,2); -h/2];
+                                
+                                coords_beg_rs = [midp(1) midp(2) midp(3)]' + rot_mat*coords_beg_rs;
+                                coords_end_rs = [midp(1) midp(2) midp(3)]' + rot_mat*coords_end_rs;
+                                coords_beg_fs = [midp(1) midp(2) midp(3)]' + rot_mat*coords_beg_fs;
+                                coords_end_fs = [midp(1) midp(2) midp(3)]' + rot_mat*coords_end_fs;
+                                coords_beg_us = [midp(1) midp(2) midp(3)]' + rot_mat*coords_beg_us;
+                                coords_end_us = [midp(1) midp(2) midp(3)]' + rot_mat*coords_end_us;
+                                coords_beg_ls = [midp(1) midp(2) midp(3)]' + rot_mat*coords_beg_ls;
+                                coords_end_ls = [midp(1) midp(2) midp(3)]' + rot_mat*coords_end_ls;
+                                
+                                line([coords_beg_rs(1) coords_end_rs(1)], [coords_beg_rs(2) coords_end_rs(2)], [coords_beg_rs(3) coords_end_rs(3)],'LineStyle','-','Color','r');
+                                line([coords_beg_fs(1) coords_end_fs(1)], [coords_beg_fs(2) coords_end_fs(2)], [coords_beg_fs(3) coords_end_fs(3)],'LineStyle','-','Color','r');
+                                line([coords_beg_us(1) coords_end_us(1)], [coords_beg_us(2) coords_end_us(2)], [coords_beg_us(3) coords_end_us(3)],'LineStyle','-','Color','r');
+                                line([coords_beg_ls(1) coords_end_ls(1)], [coords_beg_ls(2) coords_end_ls(2)], [coords_beg_ls(3) coords_end_ls(3)],'LineStyle','-','Color','r');
+                            end
+                        else
+                            fill3([c1(1) c2(1) c4(1) c3(1)],[c1(2) c2(2) c4(2) c3(2)],[c1(3) c2(3) c4(3) c3(3)],obj.beam(i).beamelement(iBEl).crosssection.t_sp_re); %plot rear spar with color relative to thickness
+                            fill3([c6(1) c5(1) c7(1) c8(1)],[c6(2) c5(2) c7(2) c8(2)],[c6(3) c5(3) c7(3) c8(3)],obj.beam(i).beamelement(iBEl).crosssection.t_sp_fr); %plot front spar
+                            fill3([c3(1) c4(1) c8(1) c7(1)],[c3(2) c4(2) c8(2) c7(2)],[c3(3) c4(3) c8(3) c7(3)],obj.beam(i).beamelement(iBEl).crosssection.t_sk_up); %plot upper skin
+                            fill3([c1(1) c2(1) c6(1) c5(1)],[c1(2) c2(2) c6(2) c5(2)],[c1(3) c2(3) c6(3) c5(3)],obj.beam(i).beamelement(iBEl).crosssection.t_sk_lo); %plot lower skin
+                        end
+                        
+                    end
+                    
                 elseif isa(obj.beam(i),'class_fuselage')
-                obj.beam(i).plot_structure(t_max,t_min); 
+                    obj.beam(i).plot_structure;
                 end
             end
+            axis equal
+            c = colorbar;
+            c.LimitsMode = 'auto';
+            title(c,'Thickness [m]');
         end
         
         
-       function obj=write_structure_tecplot(obj,filename)
-           t_max=0;
-           t_min=1000;
-           fileID = fopen([filename '.tp'],'w');
-           fprintf(fileID,'TITLE = "Example: Multi-Zone 2D Plot"\n');
-           fprintf(fileID,'VARIABLES = "X", "Y", "Z","Equivalent Thickness"\n');
+        function obj=write_structure_tecplot(obj,filename)
+            t_max=0;
+            t_min=1000;
+            fileID = fopen([filename '.tp'],'w');
+            fprintf(fileID,'TITLE = "Example: Multi-Zone 2D Plot"\n');
+            fprintf(fileID,'VARIABLES = "X", "Y", "Z","Equivalent Thickness"\n');
            
            for j=1:1:length(obj.beam)
                 if  isa(obj.beam(j),'class_wing')
@@ -631,16 +716,12 @@ classdef class_beam_collection
                         t_sp_re(i)=cell2mat({obj.beam(j).beamelement(i).crosssection.t_sp_re});
                     end
                 elseif isa(obj.beam(j),'class_fuselage')
+                    t_sk_eq = zeros(1,length(obj.beam(j).beamelement));
                     for i=1:1:length(obj.beam(j).beamelement)
                         t_sk_eq(i)=cell2mat({obj.beam(j).beamelement(i).crosssection.t_sk_eq});
                     end
-                    if sum(t_sk_eq)>0
-                        tk=[t_sk_lo t_sk_up t_sp_fr t_sp_re t_sk_eq];
-                    else
-                        tk=[t_sk_lo t_sk_up t_sp_fr t_sp_re];
-                    end
-                    t_max=max([tk t_max]);
-                    t_min=min([tk t_min]);
+                    t_max=max([t_sk_eq t_max]);
+                    t_min=min([t_sk_eq t_min]);
               
                 end
            end
@@ -1138,8 +1219,6 @@ classdef class_beam_collection
         % Uses Euler Bernoulli nodal displacements of each beam to recover 
         function obj = f_calc_stress_strain_crossmod(obj)
             
-            ndof_node = 6;
-            
             % scans through all beams
             for i = 1:length(obj.beam)
                 
@@ -1149,7 +1228,7 @@ classdef class_beam_collection
                 if obj.beam(i).anisotropic == 1
                     
                     % Runs function at beam level
-                    obj.beam(i) = obj.beam(i).f_calc_stress_strain_crossmod(ndof_node);
+                    obj.beam(i) = obj.beam(i).f_calc_stress_strain_crossmod();
                 end
             end
          end
@@ -1488,14 +1567,16 @@ classdef class_beam_collection
                 end
                 itctr=1;
                 while obj.err>0.1
-                    %obj=obj.f_assemble_free(loadstep,eval_nonlin);
-                    obj=obj.f_solve_free_modes(1,0);
+                    obj=obj.f_assemble_free(loadstep,eval_nonlin);
+                    if isempty(obj.modeshapes)
+                        obj=obj.f_solve_free_modes(1,0);
+                    end
                     shape=obj.modefrequencies*0;
                     %Mdiag=obj.modeshapes'*obj.Mff*obj.modeshapes;
-                    Kdiag=obj.modeshapes(:,1:100)'*obj.Kff*obj.modeshapes(:,1:100);
-                    Qdiag=obj.modeshapes(:,1:100)'*obj.Ftest;
+                    Kdiag=obj.modeshapes(:,1:300)'*obj.Kff*obj.modeshapes(:,1:300);
+                    Qdiag=obj.modeshapes(:,1:300)'*obj.Ftest;
                     x_now=Kdiag(7:end,7:end)^-1*Qdiag(7:end);
-                    for ss=1:100-6
+                    for ss=1:300-6
                         shape=shape+obj.modeshapes(:,6+ss)*x_now(ss);
                     end
                     obj.nodal_deflections=shape;
@@ -1620,6 +1701,11 @@ classdef class_beam_collection
             end
         end
         
+        function obj=f_solve_buckl(obj)
+            for iBeam=1:length(obj.beam)
+                obj.beam(iBeam)=obj.beam(iBeam).f_solve_buckl();
+            end
+        end
         
         
         function obj=f_solve_free_modes(obj,varargin)

@@ -55,7 +55,7 @@ end
     %end
     
     if obj.is_fueled
-        rho_fuel=obj.ref_parent_beam.fuel_density;
+        rho_fuel=obj.fuel_density;
         obj.el_fuel_vol=obj.A_enclosed*obj.le;
         obj.el_m_fuel=obj.el_fuel_vol*rho_fuel;
         m_tot=obj.m+obj.el_fuel_vol*rho_fuel/obj.le;

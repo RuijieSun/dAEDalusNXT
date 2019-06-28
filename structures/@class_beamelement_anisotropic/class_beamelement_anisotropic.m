@@ -97,6 +97,7 @@ classdef class_beamelement_anisotropic
         
         %> element fueled y/n                     []
         is_fueled=0;
+        fuel_density
         %> fuel volume per element                [m3]
         el_fuel_vol=0.0
         %> enclosed area
@@ -141,8 +142,6 @@ classdef class_beamelement_anisotropic
         % The crosssection is where objects belonging to
         % class_crosssection_wingbox_anisotropic are stored.
         crosssection;
-        %> reference to beam to which the element belongs to
-        ref_parent_beam;
         %> flag for massless beam elements
         is_massless;
         
@@ -154,6 +153,10 @@ classdef class_beamelement_anisotropic
         % Each element has 6DoF, meaning that 6DoFs are present per element
         % (the arrays are 1D, so each element has 6 entries, apart from the von mises ones).
         element_strain_crossmod;         % strain array
+        reactionForcesEndA
+        reactionForcesEndB
+        element_strain_crossmod_endA
+        element_strain_crossmod_endB
         element_strain_von_mis_crossmod; % von mises strain array
         element_stress_crossmod;         % stress arrray
         element_stress_von_mis_crossmod; % von mises stress array
@@ -164,6 +167,11 @@ classdef class_beamelement_anisotropic
         % class_beamelement.
         anisotropic = 1;
         
+        % rib locations relative to beam nodes (=0 -> @ node 1; =1 @ node2)
+        ribLocations=[];
+        % bucklingelements
+        bucklElements@class_bucklingElement
+        bucklingReserveFactors
         
     end
     
@@ -171,8 +179,8 @@ classdef class_beamelement_anisotropic
         function obj =class_beamelement_anisotropic(crosssection, parent_ref)
             % Saving the input cross section object as a class property.
             obj.crosssection=crosssection;
-            % Saving the reference to the parent beam as a class property.
-            obj.ref_parent_beam=parent_ref;
+            % Saving the info required from parent beam as a class property.
+            obj.fuel_density=parent_ref.fuel_density;
         end
         
         %compute element stiffness matrix for 6 DOF element
@@ -212,19 +220,52 @@ classdef class_beamelement_anisotropic
             euler_defl_rel = (euler_delf_node_2 - euler_delf_node_1)/obj.le;
             
             obj.element_strain_crossmod = obj.crosssection.Gamma_euler * euler_defl_rel';
+            %instead of euler strains, the full strian vector can be
+            %computed by the reaction forces and the crosssection.Gamma matrix
+            reactionForce=obj.elK*nodal_deflection_input;
+            %transformation from daedalus beam element coord in cross
+            %sectional modeller coord frame 
+            reactionForce=reactionForce([2 1 3 5 4 6 8 7 9 11 10 12]).*[1 -1 1   1 -1 1   1 -1 1   1 -1 1]';
+            obj.reactionForcesEndA=-reactionForce(1:6);
+            obj.reactionForcesEndB=reactionForce(7:12);
+            obj.element_strain_crossmod_endA = obj.crosssection.Gamma * obj.reactionForcesEndA;
+            obj.element_strain_crossmod_endB = obj.crosssection.Gamma *  obj.reactionForcesEndB;
             
-            el_idx_arr = [sum(obj.crosssection.shell_id_arr==1), sum(obj.crosssection.shell_id_arr==2), sum(obj.crosssection.shell_id_arr==3), sum(obj.crosssection.shell_id_arr==4)];
-            el_idx_arr = cumsum(el_idx_arr);
+            fs_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==1,1);
+            sk_up_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==2,1);
+            rs_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==3,1);
+            sk_lo_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==4,1);
+            
                        
-            strain_fs_unformatted = obj.element_strain_crossmod(1:el_idx_arr(1)*ndof_node);
-            strain_rs_unformatted = obj.element_strain_crossmod(el_idx_arr(2)*ndof_node+1:el_idx_arr(3)*ndof_node);
-            strain_sk_up_unformatted = obj.element_strain_crossmod(el_idx_arr(1)*ndof_node+1:el_idx_arr(2)*ndof_node);
-            strain_sk_lo_unformatted = obj.element_strain_crossmod(el_idx_arr(3)*ndof_node+1:el_idx_arr(4)*ndof_node);
+            strain_fs_unformatted = obj.element_strain_crossmod(    (min(min(fs_elId))-1)*6+1:(max(max(fs_elId)))*6   );
+            strain_rs_unformatted = obj.element_strain_crossmod(    (min(min(rs_elId))-1)*6+1:(max(max(rs_elId)))*6   );
+            strain_sk_up_unformatted = obj.element_strain_crossmod(    (min(min(sk_up_elId))-1)*6+1:(max(max(sk_up_elId)))*6   );
+            strain_sk_lo_unformatted = obj.element_strain_crossmod(    (min(min(sk_lo_elId))-1)*6+1:(max(max(sk_lo_elId)))*6   );
+            
+            strain_fs_unformatted_EndA = obj.element_strain_crossmod_endA(    (min(min(fs_elId))-1)*6+1:(max(max(fs_elId)))*6   );
+            strain_rs_unformatted_EndA  = obj.element_strain_crossmod_endA(    (min(min(rs_elId))-1)*6+1:(max(max(rs_elId)))*6   );
+            strain_sk_up_unformatted_EndA  = obj.element_strain_crossmod_endA(    (min(min(sk_up_elId))-1)*6+1:(max(max(sk_up_elId)))*6   );
+            strain_sk_lo_unformatted_EndA  = obj.element_strain_crossmod_endA(    (min(min(sk_lo_elId))-1)*6+1:(max(max(sk_lo_elId)))*6   );
+            
+            strain_fs_unformatted_EndB  = obj.element_strain_crossmod_endB(    (min(min(fs_elId))-1)*6+1:(max(max(fs_elId)))*6   );
+            strain_rs_unformatted_EndB = obj.element_strain_crossmod_endB(    (min(min(rs_elId))-1)*6+1:(max(max(rs_elId)))*6   );
+            strain_sk_up_unformatted_EndB = obj.element_strain_crossmod_endB(    (min(min(sk_up_elId))-1)*6+1:(max(max(sk_up_elId)))*6   );
+            strain_sk_lo_unformatted_EndB = obj.element_strain_crossmod_endB(    (min(min(sk_lo_elId))-1)*6+1:(max(max(sk_lo_elId)))*6   );
                        
             obj.crosssection.strain_fs = reshape(strain_fs_unformatted, [ndof_node, length(strain_fs_unformatted)/ndof_node]);
             obj.crosssection.strain_sk_up = reshape(strain_sk_up_unformatted, [ndof_node, length(strain_sk_up_unformatted)/ndof_node]);
             obj.crosssection.strain_rs = reshape(strain_rs_unformatted, [ndof_node, length(strain_rs_unformatted)/ndof_node]);
             obj.crosssection.strain_sk_lo = reshape(strain_sk_lo_unformatted, [ndof_node, length(strain_sk_lo_unformatted)/ndof_node]);
+            
+            obj.crosssection.strain_fs_endA = reshape(strain_fs_unformatted_EndA, [ndof_node, length(strain_fs_unformatted_EndA)/ndof_node]);
+            obj.crosssection.strain_sk_up_endA = reshape(strain_sk_up_unformatted_EndA, [ndof_node, length(strain_sk_up_unformatted_EndA)/ndof_node]);
+            obj.crosssection.strain_rs_endA = reshape(strain_rs_unformatted_EndA, [ndof_node, length(strain_rs_unformatted_EndA)/ndof_node]);
+            obj.crosssection.strain_sk_lo_endA = reshape(strain_sk_lo_unformatted_EndA, [ndof_node, length(strain_sk_lo_unformatted_EndA)/ndof_node]);
+            
+            obj.crosssection.strain_fs_endB = reshape(strain_fs_unformatted_EndB, [ndof_node, length(strain_fs_unformatted_EndB)/ndof_node]);
+            obj.crosssection.strain_sk_up_endB = reshape(strain_sk_up_unformatted_EndB, [ndof_node, length(strain_sk_up_unformatted_EndB)/ndof_node]);
+            obj.crosssection.strain_rs_endB = reshape(strain_rs_unformatted_EndB, [ndof_node, length(strain_rs_unformatted_EndB)/ndof_node]);
+            obj.crosssection.strain_sk_lo_endB = reshape(strain_sk_lo_unformatted_EndB, [ndof_node, length(strain_sk_lo_unformatted_EndB)/ndof_node]);
         end
         
         
@@ -236,9 +277,11 @@ classdef class_beamelement_anisotropic
             % The stresses are obtained by taking the
             % strains and multipliying them with the ABD stiffness matrices of their
             % respective skin/spar
-            
-            el_idx_arr = [sum(obj.crosssection.shell_id_arr==1), sum(obj.crosssection.shell_id_arr==2), sum(obj.crosssection.shell_id_arr==3), sum(obj.crosssection.shell_id_arr==4)];
-            el_idx_arr = cumsum(el_idx_arr);
+                        
+            fs_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==1,1);
+            sk_up_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==2,1);
+            rs_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==3,1);
+            sk_lo_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==4,1);
             
             strain_von_mis_1 = obj.element_strain_crossmod(1:6:end).^2 + obj.element_strain_crossmod(2:6:end).^2;
             strain_von_mis_2 = obj.element_strain_crossmod(1:6:end) .* obj.element_strain_crossmod(2:6:end);
@@ -268,21 +311,107 @@ classdef class_beamelement_anisotropic
             % GENERAL PLANE STRESS VON MISES
             obj.element_stress_von_mis_crossmod = sqrt(von_mis_11.^2 - von_mis_11 .* von_mis_22 + von_mis_22.^2 + 3*von_mis_12.^2);
             
-            obj.crosssection.stress_von_mis_fs = obj.element_stress_von_mis_crossmod(1:el_idx_arr(1))';
-            obj.crosssection.stress_von_mis_rs = obj.element_stress_von_mis_crossmod(el_idx_arr(2)+1:el_idx_arr(3))';
-            obj.crosssection.stress_von_mis_sk_up = obj.element_stress_von_mis_crossmod(el_idx_arr(1)+1:el_idx_arr(2))';
-            obj.crosssection.stress_von_mis_sk_lo = obj.element_stress_von_mis_crossmod(el_idx_arr(3)+1:el_idx_arr(4))';
+            obj.crosssection.stress_von_mis_fs = obj.element_stress_von_mis_crossmod(   (min(min(fs_elId))-1)*6+1:(max(max(fs_elId))-1)*6 )';
+            obj.crosssection.stress_von_mis_rs = obj.element_stress_von_mis_crossmod(  (min(min(rs_elId))-1)*6+1:(max(max(rs_elId))-1)*6   )';
+            obj.crosssection.stress_von_mis_sk_up = obj.element_stress_von_mis_crossmod((min(min(sk_up_elId))-1)*6+1:(max(max(sk_up_elId))-1)*6 )';
+            obj.crosssection.stress_von_mis_sk_lo = obj.element_stress_von_mis_crossmod((min(min(sk_lo_elId))-1)*6+1:(max(max(sk_lo_elId))-1)*6 )';
             
         end
         
         
         %Compute safety factor when asked to 
         function obj = f_calc_safety_factor(obj)
-                obj.crosssection.laminate_sk_up = obj.crosssection.laminate_sk_up.calculate_safety_factor(obj.crosssection.strain_sk_up, obj.crosssection.safety_factor);
-                obj.crosssection.laminate_sk_lo = obj.crosssection.laminate_sk_lo.calculate_safety_factor(obj.crosssection.strain_sk_lo, obj.crosssection.safety_factor);
-                obj.crosssection.laminate_fs = obj.crosssection.laminate_fs.calculate_safety_factor(obj.crosssection.strain_fs, obj.crosssection.safety_factor);
-                obj.crosssection.laminate_rs = obj.crosssection.laminate_rs.calculate_safety_factor(obj.crosssection.strain_rs, obj.crosssection.safety_factor);            
+                obj.crosssection.laminate_sk_up = obj.crosssection.laminate_sk_up.calculate_safety_factor(obj.crosssection.strain_sk_up,obj.crosssection.strain_sk_up_endA,obj.crosssection.strain_sk_up_endB, obj.crosssection.safety_factor);
+                obj.crosssection.laminate_sk_lo = obj.crosssection.laminate_sk_lo.calculate_safety_factor(obj.crosssection.strain_sk_lo,obj.crosssection.strain_sk_lo_endA,obj.crosssection.strain_sk_lo_endB, obj.crosssection.safety_factor);
+                obj.crosssection.laminate_fs = obj.crosssection.laminate_fs.calculate_safety_factor(obj.crosssection.strain_fs, obj.crosssection.strain_fs_endA, obj.crosssection.strain_fs_endB, obj.crosssection.safety_factor);
+                obj.crosssection.laminate_rs = obj.crosssection.laminate_rs.calculate_safety_factor(obj.crosssection.strain_rs, obj.crosssection.strain_rs_endA, obj.crosssection.strain_rs_endB, obj.crosssection.safety_factor);            
         end
+        
+        %initialize buckling panels
+        function obj = f_init_buckling_panels(obj)
+               % function for the initialization of the buckling panels
+
+                %contains bucklingElement widths and type of laminate;
+                % the four rows belong to fs sk_up rs and sk_lo
+                w_fs=norm(obj.crosssection.fs_nodes_yz(end,:)-obj.crosssection.fs_nodes_yz(1,:));
+                w_sk_up=norm(obj.crosssection.sk_up_nodes_yz(end,:)-obj.crosssection.sk_up_nodes_yz(1,:))/(obj.crosssection.n_st_up+1);
+                w_rs=norm(obj.crosssection.rs_nodes_yz(end,:)-obj.crosssection.rs_nodes_yz(1,:));
+                w_sk_lo=norm(obj.crosssection.sk_lo_nodes_yz(end,:)-obj.crosssection.sk_lo_nodes_yz(1,:))/(obj.crosssection.n_st_lo+1);
+                bayLengths=diff(obj.ribLocations*obj.le);
+                uniqueBayLengths=unique(round(bayLengths,5));
+                % for each unique length, four bucklElements are added with
+                % the different laminates and widths:
+                obj.bucklElements=class_bucklingElement.empty(length(uniqueBayLengths)*4,0);
+                for iUniqueBay=1:length(uniqueBayLengths)
+                    %fs
+                    obj.bucklElements((iUniqueBay-1)*4+1)=class_bucklingElement(uniqueBayLengths(iUniqueBay),w_fs);
+                    obj.bucklElements((iUniqueBay-1)*4+1).lamId=1;
+                    obj.bucklElements((iUniqueBay-1)*4+1).type='shearOnly';
+                    %sk up
+                    obj.bucklElements((iUniqueBay-1)*4+2)=class_bucklingElement(uniqueBayLengths(iUniqueBay),w_sk_up);
+                    obj.bucklElements((iUniqueBay-1)*4+2).lamId=2;
+                    %rs
+                    obj.bucklElements((iUniqueBay-1)*4+3)=class_bucklingElement(uniqueBayLengths(iUniqueBay),w_rs);
+                    obj.bucklElements((iUniqueBay-1)*4+3).lamId=3;
+                    obj.bucklElements((iUniqueBay-1)*4+3).type='shearOnly';
+                    %sk_lo
+                    obj.bucklElements((iUniqueBay-1)*4+4)=class_bucklingElement(uniqueBayLengths(iUniqueBay),w_sk_lo);
+                    obj.bucklElements((iUniqueBay-1)*4+4).lamId=4;
+                end
+
+        
+        end
+        
+        
+        %compute buckling reserve factors
+        function obj= f_solve_buckl(obj)
+            %bucklingReserveFactors: 
+            %rows: (mode1/ mode2) 
+            %columns: elements (order: fs, sk_up,rs,sk_lo)
+            %3d dim: rib
+            obj.bucklingReserveFactors=zeros(2,sum((obj.crosssection.elements(:,4)<5)),length(obj.ribLocations)-1);
+            for iBucklEl=1:length(obj.bucklElements) % looping over all buckling panels of the crosssection (normally 4)
+                switch obj.bucklElements(iBucklEl).lamId
+                    %get correct ABD
+                    case 1
+                        ABD=obj.crosssection.laminate_fs.ABD_stiff;
+                    case 2
+                        ABD=obj.crosssection.laminate_sk_up.ABD_stiff;
+                    case 3
+                        ABD=obj.crosssection.laminate_rs.ABD_stiff;
+                    case 4
+                        ABD=obj.crosssection.laminate_sk_lo.ABD_stiff;
+                end
+                
+                %shell elements belonging to this buckling bay and
+                %buckling element
+                shellId=find(obj.crosssection.elements(:,4)==obj.bucklElements(iBucklEl).lamId);
+
+                %strainDofs of these shellIds
+                strainDofs=(min(shellId)-1)*6+1:max(shellId)*6;
+
+                %Strains at these shell Elements
+                strainsEndA=[ obj.element_strain_crossmod_endA(strainDofs(1:6:end))';...
+                              obj.element_strain_crossmod_endA(strainDofs(2:6:end))';...
+                              obj.element_strain_crossmod_endA(strainDofs(3:6:end))';];
+                strainsEndB=[ obj.element_strain_crossmod_endB(strainDofs(1:6:end))';...
+                              obj.element_strain_crossmod_endB(strainDofs(2:6:end))';...
+                              obj.element_strain_crossmod_endB(strainDofs(3:6:end))';];
+                    
+                for iRib=1:length(obj.ribLocations) %looping over all bays
+                    ribLoc=obj.ribLocations(iRib);
+                    %interpolate strains from beam element ends to buckling bay boundaries
+                    
+                    %first boundary
+                    strainsAtRib=strainsEndA+ribLoc.*(strainsEndB-strainsEndA);
+                    %bucklingReserveFactor is already in constraint form
+                    %(here 1 needs to be subtracted) then buckling free for
+                    %bucklingreservefactor <=0
+                    obj.bucklingReserveFactors(:,shellId,iRib)=obj.bucklElements(iBucklEl).calcBucklingReserveFactors([strainsAtRib],ABD)-1;
+                end
+            end
+        end
+        
         
         % Thsi function uses the Euler Bernoulli beam's nodal displacements
         % found by solving the linear system and combines them with
@@ -330,21 +459,21 @@ classdef class_beamelement_anisotropic
             % the bottom skin, going in a counter-clockwise direction
             % (looking from the tip of the beam to the root).
             
-            % The el_idx_arr array containts 4 entries. They are the
-            % indices where entries element_strain_crossmod switch from fs
-            % to sk_up, from sk_up to rs, from rs to sk_lo and the final
-            % index of the array.
+            % The elId arrays contain the ids of the elements belonging to the different components          
             
-            el_idx_arr = [sum(obj.crosssection.shell_id_arr==1), sum(obj.crosssection.shell_id_arr==2), sum(obj.crosssection.shell_id_arr==3), sum(obj.crosssection.shell_id_arr==4)];
-            el_idx_arr = cumsum(el_idx_arr);
+                        
+            fs_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==1,1);
+            sk_up_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==2,1);
+            rs_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==3,1);
+            sk_lo_elId=obj.crosssection.elements(obj.crosssection.elements(:,4)==4,1);
             
             % The element_strain_crossmod is split into 4 separate 1D
             % array, 1 for each spar/skin.
             
-            strain_fs_unformatted = obj.element_strain_crossmod(1:el_idx_arr(1)*ndof_node);
-            strain_rs_unformatted = obj.element_strain_crossmod(el_idx_arr(2)*ndof_node+1:el_idx_arr(3)*ndof_node);
-            strain_sk_up_unformatted = obj.element_strain_crossmod(el_idx_arr(1)*ndof_node+1:el_idx_arr(2)*ndof_node);
-            strain_sk_lo_unformatted = obj.element_strain_crossmod(el_idx_arr(3)*ndof_node+1:el_idx_arr(4)*ndof_node);
+            strain_fs_unformatted = obj.element_strain_crossmod(    (min(min(fs_elId))-1)*6+1:(max(max(fs_elId))-1)*6   );
+            strain_rs_unformatted = obj.element_strain_crossmod(    (min(min(rs_elId))-1)*6+1:(max(max(rs_elId))-1)*6   );
+            strain_sk_up_unformatted = obj.element_strain_crossmod(    (min(min(sk_up_elId))-1)*6+1:(max(max(sk_up_elId))-1)*6   );
+            strain_sk_lo_unformatted = obj.element_strain_crossmod(    (min(min(sk_lo_elId))-1)*6+1:(max(max(sk_lo_elId))-1)*6   );
             
             % The 1D strain arrays of each spar/skin are reshaped into 2D
             % arrays, where each row is a DOF (there are 6) and each column
@@ -413,10 +542,10 @@ classdef class_beamelement_anisotropic
             % GENERAL PLANE STRESS VON MISES
             obj.element_stress_von_mis_crossmod = sqrt(von_mis_11.^2 - von_mis_11 .* von_mis_22 + von_mis_22.^2 + 3*von_mis_12.^2);
             
-            obj.crosssection.stress_von_mis_fs = obj.element_stress_von_mis_crossmod(1:el_idx_arr(1))';
-            obj.crosssection.stress_von_mis_rs = obj.element_stress_von_mis_crossmod(el_idx_arr(2)+1:el_idx_arr(3))';
-            obj.crosssection.stress_von_mis_sk_up = obj.element_stress_von_mis_crossmod(el_idx_arr(1)+1:el_idx_arr(2))';
-            obj.crosssection.stress_von_mis_sk_lo = obj.element_stress_von_mis_crossmod(el_idx_arr(3)+1:el_idx_arr(4))';
+            obj.crosssection.stress_von_mis_fs = obj.element_stress_von_mis_crossmod(   (min(min(fs_elId))-1)*6+1:(max(max(fs_elId))-1)*6 )';
+            obj.crosssection.stress_von_mis_rs = obj.element_stress_von_mis_crossmod(  (min(min(rs_elId))-1)*6+1:(max(max(rs_elId))-1)*6   )';
+            obj.crosssection.stress_von_mis_sk_up = obj.element_stress_von_mis_crossmod((min(min(sk_up_elId))-1)*6+1:(max(max(sk_up_elId))-1)*6 )';
+            obj.crosssection.stress_von_mis_sk_lo = obj.element_stress_von_mis_crossmod((min(min(sk_lo_elId))-1)*6+1:(max(max(sk_lo_elId))-1)*6 )';
             
             % Calculating the fail indices of each skin/spar.
             %
@@ -427,14 +556,66 @@ classdef class_beamelement_anisotropic
             %
             % fail index = -[(design envelope safety factor)/(cross section user safety factor) - 1]
             if obj.crosssection.calcul_failIdx == 1
-                obj.crosssection.laminate_sk_up = obj.crosssection.laminate_sk_up.calculate_safety_factor(obj.crosssection.strain_sk_up, obj.crosssection.safety_factor);
-                obj.crosssection.laminate_sk_lo = obj.crosssection.laminate_sk_lo.calculate_safety_factor(obj.crosssection.strain_sk_lo, obj.crosssection.safety_factor);
-                obj.crosssection.laminate_fs = obj.crosssection.laminate_fs.calculate_safety_factor(obj.crosssection.strain_fs, obj.crosssection.safety_factor);
-                obj.crosssection.laminate_rs = obj.crosssection.laminate_rs.calculate_safety_factor(obj.crosssection.strain_rs, obj.crosssection.safety_factor);
+                obj = f_calc_safety_factor();
             end
         end
         
+        function obj = f_plot_strains(obj,varargin)
+            if ~isempty(varargin)
+                offset=varargin{1};
+            else
+                offset=[0 0 0];
+            end
+                for iEl=1:size(obj.element_strain_crossmod_endA,1)/6
+                    y=[0 1]'*obj.le;
+                    y=kron(y, ones(2,1));
+                    %cornerpoints of first element in beam element coordinate
+                    %system
+                    %
+                    x=obj.crosssection.nodes_yz(obj.crosssection.elements(iEl,2:3),1);
+                    x=[x; x];
+                    z=obj.crosssection.nodes_yz(obj.crosssection.elements(iEl,2:3),2);
+                    z=[z; z];
+                    data1=obj.element_strain_crossmod_endA((iEl-1)*6+1);
+                    data2=obj.element_strain_crossmod_endB((iEl-1)*6+1);
+                    c=[data1;data1;data2;data2];
+                    coords=offset'+obj.T(1:3,1:3)'*[x y z]';
+                    idx=[1 3 4 2];
+                    fill3(coords(1,idx)',coords(2,idx)',coords(3,idx)',c(idx),'FaceAlpha',1)
+                end
+            
+                
+        end
         
+        function obj = f_plot_bucklingReserveFactors(obj, varargin)
+            if ~isempty(varargin)
+                offset=varargin{1};
+            else
+                offset=[0 0 0];
+            end
+                
+            for iBay=1:length(obj.ribLocations)-1
+                for iEl=1:size(obj.bucklingReserveFactors,2)
+                    y=obj.ribLocations(iBay:iBay+1)'*obj.le;
+                    y=kron(y, ones(2,1));
+                    %cornerpoints of first element in beam element coordinate
+                    %system
+                    %
+                    x=obj.crosssection.nodes_yz(obj.crosssection.elements(iEl,2:3),1);
+                    x=[x; x];
+                    z=obj.crosssection.nodes_yz(obj.crosssection.elements(iEl,2:3),2);
+                    z=[z; z];
+                    data1=obj.bucklingReserveFactors(1,iEl,1);
+                    data2=obj.bucklingReserveFactors(1,iEl,2);
+                    c=[data1;data1;data2;data2];
+                    coords=offset'+obj.T(1:3,1:3)'*[x y z]';
+                    idx=[1 3 4 2];
+                    fill3(coords(1,idx)',coords(2,idx)',coords(3,idx)',c(idx),'FaceAlpha',1)
+                end
+            end
+            
+        end
+            
         % This function generates a 3D plot of the strains or stresses
         % within the whole wingbox. The plot is similar to a color-mapped
         % FEM plot.

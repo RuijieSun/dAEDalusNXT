@@ -42,10 +42,18 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
         %> loadcase index for the lower skin                    [m]
         t_sk_lo_lc_idx = 0;
 
+        %> number of upper stringers                            [-]
+        n_st_up = 0;    
+        %> number of lower stringers                            [-]
+        n_st_lo = 0;     
         %> thickness of upper stringers                         [m]
         t_st_up = 0;    
         %> thickness of lower stringers                         [m]
-        t_st_lo = 0;     
+        t_st_lo = 0;    
+        %> height of upper stringers                            [m]
+        h_st_up = 0;    
+        %> height of lower stringers                            [m]
+        h_st_lo = 0;      
         
         %> front spar thickness                                 [m]
         t_sp_fr = 0;
@@ -60,6 +68,8 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
         t_min_sp = 0;
         %> minimum allowable skin thickness
         t_min_sk = 0;
+        %> minimum allowable stringer thickness
+        t_min_st = 0;
         
         %% material properties at cross-section
         
@@ -108,6 +118,8 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
         rs_nodes_nr;      % rear spar
         sk_up_nodes_nr;   % upper skin
         sk_lo_nodes_nr;   % lower skin
+        st_up_nodes_nr;   % stringers on upper skin
+        st_lo_nodes_nr;   % stringers on lower skin
         
         % yz coordinates of each node in discretized cross section
         % elements
@@ -115,9 +127,15 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
         rs_nodes_yz      % rear spar
         sk_up_nodes_yz   % upper skin
         sk_lo_nodes_yz   % lower skin
+        st_up_nodes_yz   % upper skin stringers
+        st_lo_nodes_yz   % lower skin stringers
+        nodes_yz         % merged nodes for connected elements
+        elements         % shell elements (id, node1, node2, laminateId) (laminateId=1:fs;2=sk_up;3:rs; 4:sk_lo; 5:st)
         
         % Local Euler Bernoulli stiffness matrix of cross section.
         Se; %CURRENTLY ONLY Se IS USED IN THE MODEL
+        % Local Timoshenko stiffness matrix 
+        S6;
         % Local Euler Bernoulli compliance matrix of cross section
         Ce;
         % Local shear compliance matrix of cross section
@@ -158,6 +176,15 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
         strain_rs;
         strain_sk_lo;
         
+        strain_fs_endA;
+        strain_sk_up_endA;
+        strain_rs_endA;
+        strain_sk_lo_endA;
+        strain_fs_endB;
+        strain_sk_up_endB;
+        strain_rs_endB;
+        strain_sk_lo_endB;
+        
         % Arrays for the stresses in skins and spars. These are obtained
         % from the strains mentioned above.
         stress_fs;
@@ -173,11 +200,12 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
         stress_von_mis_sk_lo;
         
         % Instances of the laminate class, representing the lamiante of
-        % each respective skin or spar
+        % each respective skin or spar and the stringers
         laminate_sk_up;
         laminate_sk_lo;
         laminate_fs;
         laminate_rs;
+        laminate_st;
                 
 
 
@@ -306,8 +334,10 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
         %>
         %> @return instance of the class_crosssection_wingbox
         % =================================================================
-        function obj = calcArea(obj)  
-            obj.A_enclosed = (obj.w - obj.t_sp_fr - obj.t_sp_re)/2 * (obj.h_fs + obj.h_rs - 2*(obj.t_sk_up + obj.t_sk_lo));
+        function obj = calcArea(obj) 
+            Abox=(obj.w - obj.t_sp_fr - obj.t_sp_re)/2 * (obj.h_fs + obj.h_rs - 2*(obj.t_sk_up + obj.t_sk_lo)); %area with half thickness
+            Astr=(obj.n_st_lo*obj.t_st_lo*obj.h_st_lo)+(obj.n_st_up*obj.t_st_up*obj.h_st_up);
+            obj.A_enclosed = Abox-Astr;
             obj.A_fuel = obj.fueling_factor * obj.A_enclosed;
             obj.A_material = obj.w/2*(obj.h_fs + obj.h_rs) - obj.A_enclosed;
         end
@@ -335,6 +365,8 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
                 obj.w = varargin{4};
                 obj.h = 0.5*(obj.h_fs + obj.h_rs);
             end
+            obj.h_st_lo=0.1*obj.h;
+            obj.h_st_up=0.1*obj.h;
 
             obj = obj.calcArea();
         end
@@ -380,21 +412,38 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
             % Material invariants used to solve for feasible design region
             design_envelope_u_arr = [structure.materials.u1, structure.materials.u2, structure.materials.u3, structure.materials.u4, structure.materials.u5, structure.materials.u6];
             
-            %> minimum wing and spar thicknesses. Used for first guess of
-            %  thickness and laminate creation
+            % Material invariants used to solve for feasible design region
+            % defined by khani
+            design_envelope_u_arr_khani = [structure.materials.u1k, structure.materials.u2k, structure.materials.u3k, structure.materials.u4k, structure.materials.u5k, structure.materials.u6k];
+
+            %> minimum wing, spar and stringer thicknesses. Used for first
+            %guess of thickness and laminate creation
             obj.t_min_sk = layup_settings.wingTminSK;
             obj.t_min_sp = layup_settings.wingTminSP;
+            obj.t_min_st = layup_settings.wingTminST;
             
             if nargin == 4
                 obj.t_min_sk = varargin{1};
                 obj.t_min_sp = varargin{1};
             end
+            %set number of stringers
+            if ~isfield(layup_settings,'stringersDensity')
+                layup_settings.stringersDensity=0;
+                layup_settings.stringers_layup_angles=layup_settings.skins_layup_angles;
+                layup_settings.stringers_layup_fractions=layup_settings.skins_layup_fractions;
+            end
+            obj.n_st_lo=ceil(obj.w*layup_settings.stringersDensity);
+            obj.n_st_up=ceil(obj.w*layup_settings.stringersDensity);
             
+            %set thickness
             obj.t_sk_up = obj.t_min_sk;
             obj.t_sk_lo = obj.t_min_sk;
+            obj.t_st_lo = obj.t_min_sk;
+            obj.t_st_up = obj.t_min_sk;
             
             obj.t_sp_fr = obj.t_min_sp;
             obj.t_sp_re = obj.t_min_sp;
+            obj=obj.calcArea();
             
             
             % runs layup generator (complex version, used only for
@@ -405,6 +454,9 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
             
             [final_layup_sp, t_array_final_sp] = ...
                 class_laminate.layup_generator(layup_settings.spars_layup_angles, layup_settings.spars_layup_fractions, obj.t_min_sp, structure.materials.t_ply);
+            
+            [final_layup_st, t_array_final_st] = ...
+                class_laminate.layup_generator(layup_settings.stringers_layup_angles, layup_settings.stringers_layup_fractions, obj.t_min_st, structure.materials.t_ply);
             
             % IMPORTANT: THE FINAL LAYUPS BELOW ASSUME THAT THE INPUT LAYUP
             % ORIENTATION FOLLOWS THE BEAM ELEMENT COORDINATE SYSTEM. THE
@@ -419,11 +471,13 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
             % Normal of lower skin is pointing in same direction as z-axis of beam element
             % Normal of front spar is pointing in same direction as x-axis of beam element
             % Normal of lower skin is pointing opposite to z-axis of beam element
+            % Normals of stringers are pointing in same direction as x-axis of beam element
             final_layup_sk_up = final_layup_sk;
             final_layup_sk_lo = -final_layup_sk; %lower skin laminate is defined in the beam coordinate system 
             
             final_layup_sp_fr = final_layup_sp;
             final_layup_sp_re = final_layup_sp;
+            
             
             % creating the laminate class instances belonging to each skin
             % and spar
@@ -436,10 +490,12 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
             
             offset_angle_first_run = 0;
             
-            obj.laminate_sk_up = class_laminate(final_layup_sk_up, ply_properties,t_array_final_sk, design_envelope_u_arr, offset_angle_first_run);
-            obj.laminate_sk_lo = class_laminate(final_layup_sk_lo, ply_properties,t_array_final_sk, design_envelope_u_arr, offset_angle_first_run);
-            obj.laminate_fs = class_laminate(final_layup_sp_fr, ply_properties, t_array_final_sp, design_envelope_u_arr, offset_angle_first_run);
-            obj.laminate_rs = class_laminate(final_layup_sp_re, ply_properties, t_array_final_sp, design_envelope_u_arr, offset_angle_first_run);
+            obj.laminate_sk_up = class_laminate(final_layup_sk_up, ply_properties,t_array_final_sk, design_envelope_u_arr, design_envelope_u_arr_khani, offset_angle_first_run);
+            obj.laminate_sk_lo = class_laminate(final_layup_sk_lo, ply_properties,t_array_final_sk, design_envelope_u_arr, design_envelope_u_arr_khani, offset_angle_first_run);
+            obj.laminate_fs = class_laminate(final_layup_sp_fr, ply_properties, t_array_final_sp, design_envelope_u_arr, design_envelope_u_arr_khani, offset_angle_first_run);
+            obj.laminate_rs = class_laminate(final_layup_sp_re, ply_properties, t_array_final_sp, design_envelope_u_arr, design_envelope_u_arr_khani, offset_angle_first_run);
+            obj.laminate_st = class_laminate(final_layup_st, ply_properties, t_array_final_st, design_envelope_u_arr, design_envelope_u_arr_khani, offset_angle_first_run);
+            
             
             % Assigns ABD stiffness matrices to skins/spars
 %             obj.fs_ABD = obj.laminate_fs.ABD_stiff;
@@ -536,11 +592,33 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
             % if nr_nodes is different from zero, then the discretization
             % assigns nr_nodes nodes to each cross section skin/spar
             elseif nr_nodes ~= 0
-                obj.fs_nodes_nr = nr_nodes;
-                obj.rs_nodes_nr = nr_nodes;
+                obj.fs_nodes_nr = max(3,ceil(nr_nodes*obj.h/obj.w));
+                obj.rs_nodes_nr = max(3,ceil(nr_nodes*obj.h/obj.w));
+                obj.st_up_nodes_nr = max(2,ceil((nr_nodes*obj.h_st_up/obj.w)+1));
+                obj.st_lo_nodes_nr = max(2,ceil((nr_nodes*obj.h_st_lo/obj.w)+1));
                 obj.sk_up_nodes_nr = nr_nodes;
                 obj.sk_lo_nodes_nr = nr_nodes;
             end
+            
+            % check that nr nodes of up skin is minimum the number of
+            % stringers nNodes=(n_st+1)*nMin + 1 (meaning minimum nMin
+            % Shells between 2 stringers or one spar and a stringer)
+            nMin=1; % minimum number of shells between stringers/spars
+            minNnodesUp=(obj.n_st_up+1)*nMin+1;
+            minNnodesLo=(obj.n_st_lo+1)*nMin+1;
+            
+            if nr_nodes<minNnodesUp
+                obj.sk_up_nodes_nr = minNnodesUp;
+            else % make sure that there is enough nodes for an equal number of shells between all the stringers/spars
+                 obj.sk_up_nodes_nr=(obj.n_st_up+1)*ceil((nr_nodes-1)/(obj.n_st_up+1))+1;
+            end
+            if nr_nodes<minNnodesLo
+                obj.sk_lo_nodes_nr = minNnodesLo;
+            else
+                 obj.sk_lo_nodes_nr=(obj.n_st_lo+1)*ceil((nr_nodes-1)/(obj.n_st_lo+1))+1;
+            end
+                
+            
             
             % defining yz coordinates of each node within each cross
             % section element. Order is counter-clockwise, starting from bottom of
@@ -567,8 +645,54 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
             
             obj.fs_nodes_yz = [obj.w/2 * ones(obj.fs_nodes_nr,1),linspace(-obj.h_fs/2,+obj.h_fs/2,obj.fs_nodes_nr)'];
             obj.rs_nodes_yz = [-obj.w/2 * ones(obj.rs_nodes_nr,1),linspace(+obj.h_rs/2,-obj.h_rs/2,obj.rs_nodes_nr)'];
+ 
             obj.sk_up_nodes_yz = [linspace(obj.w/2,-obj.w/2,obj.sk_up_nodes_nr)', linspace(+obj.h_fs/2, +obj.h_rs/2, obj.sk_up_nodes_nr)'];
             obj.sk_lo_nodes_yz = [linspace(-obj.w/2,obj.w/2,obj.sk_lo_nodes_nr)',linspace(-obj.h_rs/2, -obj.h_fs/2, obj.sk_lo_nodes_nr)'];
+            
+            %generate skin grid for upper stringers
+            zCoordinatesStUp=linspace(obj.h/2-obj.h_st_up,obj.h/2,obj.st_up_nodes_nr);
+            yCoordinatesStUp=linspace(-obj.w/2+obj.w/(obj.n_st_up+1),obj.w/2-obj.w/(obj.n_st_up+1),obj.n_st_up);
+            [t1, t2]=meshgrid(zCoordinatesStUp,yCoordinatesStUp);
+            obj.st_up_nodes_yz=[reshape(t2',numel(t2),1),reshape(t1',numel(t1),1)];
+            
+            zCoordinatesStLo=linspace(-obj.h/2+obj.h_st_lo,-obj.h/2,obj.st_lo_nodes_nr);
+            yCoordinatesStLo=linspace(-obj.w/2+obj.w/(obj.n_st_lo+1),obj.w/2-obj.w/(obj.n_st_lo+1),obj.n_st_lo);
+            [t1, t2]=meshgrid(zCoordinatesStLo,yCoordinatesStLo);
+            obj.st_lo_nodes_yz=[reshape(t2',numel(t2),1), reshape(t1',numel(t1),1)];
+            
+           
+            %create elements for each component
+            % columns: 1: id; 2: node1, 3: node2 4:component/laminate id (laminateId=1:fs;2=sk_up;3:rs; 4:sk_lo; 5:st)
+            %fs
+            fsElements=[(1:obj.fs_nodes_nr-1 )' (1:obj.fs_nodes_nr-1 )' (2:obj.fs_nodes_nr )' ones( obj.fs_nodes_nr-1,1)];
+            %sk_up
+            skUpElements=[(1:obj.sk_up_nodes_nr-1 )' (1:obj.sk_up_nodes_nr-1 )' (2:obj.sk_up_nodes_nr )' repmat(2, obj.sk_up_nodes_nr-1,1)];
+            %rs
+            rsElements=[(1:obj.rs_nodes_nr-1 )' (1:obj.rs_nodes_nr-1 )' (2:obj.rs_nodes_nr )' repmat(3, obj.rs_nodes_nr-1,1)];
+            %sk_lo
+            skLoElements=[(1:obj.sk_lo_nodes_nr-1 )' (1:obj.sk_lo_nodes_nr-1 )' (2:obj.sk_lo_nodes_nr )' repmat(4, obj.sk_lo_nodes_nr-1,1)];
+            %st_up
+            nStUpElements=(obj.st_up_nodes_nr-1)*obj.n_st_up;
+            stUpElements=[(1:nStUpElements)' ...
+                            setdiff(1:obj.st_up_nodes_nr*obj.n_st_up-1  , obj.st_up_nodes_nr:obj.st_up_nodes_nr:obj.st_up_nodes_nr*obj.n_st_up-1 )' ...
+                            setdiff(2:obj.st_up_nodes_nr*obj.n_st_up  , obj.st_up_nodes_nr+1:obj.st_up_nodes_nr:obj.st_up_nodes_nr*obj.n_st_up )'...
+                             repmat(5, nStUpElements,1)];
+            %st_lo
+            nStLoElements=(obj.st_lo_nodes_nr-1)*obj.n_st_lo;
+            stLoElements=[(1:nStLoElements)' ...
+                            setdiff(1:obj.st_lo_nodes_nr*obj.n_st_lo-1  , obj.st_lo_nodes_nr:obj.st_lo_nodes_nr:obj.st_lo_nodes_nr*obj.n_st_lo-1 )' ...
+                            setdiff(2:obj.st_lo_nodes_nr*obj.n_st_lo  , obj.st_lo_nodes_nr+1:obj.st_lo_nodes_nr:obj.st_lo_nodes_nr*obj.n_st_lo )'...
+                             repmat(5, nStLoElements,1)];            
+            allElements=fsElements;
+            allNodes=obj.fs_nodes_yz;
+            % merge fs with sk_up in all
+            [allElements, allNodes]=obj.mergeElements(allElements,allNodes,skUpElements,obj.sk_up_nodes_yz);
+            % merge all with rs in all
+            [allElements, allNodes]=obj.mergeElements(allElements,allNodes,rsElements,obj.rs_nodes_yz);
+            [allElements, allNodes]=obj.mergeElements(allElements,allNodes,skLoElements,obj.sk_lo_nodes_yz);
+            % merge all with sk_lo in all
+            [allElements, allNodes]=obj.mergeElements(allElements,allNodes,stUpElements,obj.st_up_nodes_yz);
+            [obj.elements, obj.nodes_yz]=obj.mergeElements(allElements,allNodes,stLoElements,obj.st_lo_nodes_yz);
             
         end
         
@@ -594,7 +718,7 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
         % function f_calc_stress_strain_crossmod.
         % The function below is defined only to avoid error due to abstract
         % methods present in class_crosssection not being present here
-        function f_calc_stresses(Mbx, Mby, Mt, Qx, Qz, loadcase_idx, overwrite)
+        function obj = f_calc_stresses(obj, Mbx, Mby, Mt, Qx, Qz, loadcase_idx, overwrite)
         end
         
         % the self design cross section function is not needed anymore, as
@@ -602,9 +726,56 @@ classdef class_crosssection_wingbox_anisotropic < class_crosssection
         % object, using safety factor function.
         % The function below is defined only to avoid error due to abstract
         % methods present in class_crosssection not being present here
-        function f_self_design_crosssection(Mbx, Mby, Mt, Qx, Qz, loadcase_idx, overwrite)
+        function obj = f_self_design_crosssection(obj,Mbx, Mby, Mt, Qx, Qz, loadcase_idx, overwrite)
         end
-        
+        function plotCrossSection(obj)
+
+            plot(obj.nodes_yz(:,1),obj.nodes_yz(:,2),'.');
+            hold on; 
+            for iEl=1:size(obj.elements,1)
+                plot(obj.nodes_yz(obj.elements(iEl,2:3),1),obj.nodes_yz(obj.elements(iEl,2:3),2))
+            end
+
+
+        end
+    end
+    methods(Static)
+        function [elementsMerged, nodesMerged] =mergeElements(el1, nodes1,el2,nodes2)
+            % merge nodes
+            nodesMerged=round([nodes1;nodes2],12);
+            %alter ids of elements
+            el2(:,1)=el2(:,1)+max(el1(:,1));
+            %alter ids of nodes 
+            el2(:,2)=el2(:,2)+size(nodes1,1);
+            el2(:,3)=el2(:,3)+size(nodes1,1);
+            %merge elements
+            elementsMerged=[el1;el2];
+            %check for doubles
+            [~,iRow]=unique(nodesMerged,'rows','stable');
+            while size(iRow,1)<size(nodesMerged,1)
+                %find row to delete
+                idToDelete=find(diff(iRow)>1,1,'first')+1;
+                if isempty(idToDelete)
+                    idToDelete=size(iRow,1)+1;
+                end
+                % what is the id of the first occurence 
+                idReplace=find(and(nodesMerged(:,1)==nodesMerged(idToDelete,1), nodesMerged(:,2)==nodesMerged(idToDelete,2)),1,'first');
+                % delete row in nodes
+                nodesMerged=[nodesMerged(1:idToDelete-1,:) ;nodesMerged(idToDelete+1:end,:)];
+                
+                elementsMerged(elementsMerged(:,2)==idToDelete,2)=idReplace;
+                elementsMerged(elementsMerged(:,3)==idToDelete,3)=idReplace;
+                % change id of all later nodes
+                elementsMerged(elementsMerged(:,2)>idToDelete,2)=elementsMerged(elementsMerged(:,2)>idToDelete,2)-1;
+                elementsMerged(elementsMerged(:,3)>idToDelete,3)=elementsMerged(elementsMerged(:,3)>idToDelete,3)-1;
+                               
+                
+                % check again
+                [~,iRow]=unique(nodesMerged,'rows','stable');
+            end
+          
+        end
+       
     end 
 end
 

@@ -74,7 +74,11 @@ function obj = f_structural_layout(obj,overwrite)
                 obj.beamelement(i).A_enclosed=1;   
         else
             obj.beamelement(i).crosssection=obj.beamelement(i).crosssection.f_self_design_crosssection(MBX,MBZ,MT,QX,QZ,obj.loadcase_index,overwrite);
-            obj.beamelement(i)=obj.beamelement(i).f_calcCrossProp();
+            if obj.anisotropic
+                obj.beamelement(i)=obj.beamelement(i).f_calcCrossProp_anisotropic();
+            else
+                obj.beamelement(i)=obj.beamelement(i).f_calcCrossProp();
+            end
         end
         %wingsection{i}.f_self_design_crosssection(Mb(i),Mt(i),Q(i)); 
         % compute fuel volume per element
