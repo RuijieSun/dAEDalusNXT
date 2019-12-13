@@ -25,56 +25,57 @@ if strcmp(xmlstruct.child(1).tag,'DAEDALUS')
                 end
                 for seg=1:length(xml_aircraft.child(i).child(j).child)
                     factor=1;
-                    for wb=1:length(xml_aircraft.child(i).child(j).child(seg).child)
-                        if strcmp(xml_aircraft.child(i).child(j).child(seg).child(wb).tag,'CONTROL_SURFACE')
-                            if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value)==0)
-                                factor=[factor 1];
-                            end
-                            if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value)==1)
-                                factor=[factor 1];
-                            end
+                    csPos=find(strcmp({xml_aircraft.child(i).child(j).child(seg).child(:).tag},'CONTROL_SURFACE'));
+                    wbPos=find(strcmp({xml_aircraft.child(i).child(j).child(seg).child(:).tag},'WINGBOX'));
+                    if ~isempty(csPos)
+                        wb=csPos;
+                        
+                        if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value)==0)
+                            factor=[factor 1];
                         end
-                        if strcmp(xml_aircraft.child(i).child(j).child(seg).child(wb).tag,'WINGBOX')
-                            if length(factor)>1
-                                root_fs=str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(1).value);
-                                tip_fs=str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value);
-                                root_rs=str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value);
-                                tip_rs=str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(4).value);
-                                
-                                if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value)==0)
-                                    inner_fs=(tip_fs)*(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value))+(root_fs)*(1-str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value));
-                                    inner_rs=(tip_rs)*(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value))+(root_rs)*(1-str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value));
-                                else
-                                    inner_fs=[];
-                                    inner_rs=[];
-                                end
-                                if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value)==1)
-                                    outer_fs=(tip_fs)*(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value))+(root_fs)*(1-str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value));
-                                    outer_rs=(tip_rs)*(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value))+(root_rs)*(1-str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value));
-                                else
-                                    outer_fs=[];
-                                    outer_rs=[];
-                                end
-                                frontspar=[frontspar str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(1).value) inner_fs inner_fs  outer_fs outer_fs str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value)];
-                                rearspar=[rearspar str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value) inner_rs inner_rs outer_rs outer_rs str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(4).value)];
-                            else
-                                frontspar=[frontspar str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(1).value) str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value)];
-                                rearspar=[rearspar str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value) str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(4).value)];
-                            end
-                            is_fueled=[is_fueled factor*str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(5).value)];
-                            material{seg}= xml_aircraft.child(i).child(j).child(seg).child(wb).child(6).attribs.value;
-                            
-                            % saving extra properties related to layup.
-                            % Only executes if material is anisotropic
+                        if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value)==1)
+                            factor=[factor 1];
+                        end
+                    end
+                    wb=wbPos;
+                    if length(factor)>1
+                        root_fs=str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(1).value);
+                        tip_fs=str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value);
+                        root_rs=str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value);
+                        tip_rs=str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(4).value);
+
+                        if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value)==0)
+                            inner_fs=(tip_fs)*(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value))+(root_fs)*(1-str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value));
+                            inner_rs=(tip_rs)*(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value))+(root_rs)*(1-str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value));
+                        else
+                            inner_fs=[];
+                            inner_rs=[];
+                        end
+                        if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value)==1)
+                            outer_fs=(tip_fs)*(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value))+(root_fs)*(1-str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value));
+                            outer_rs=(tip_rs)*(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value))+(root_rs)*(1-str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value));
+                        else
+                            outer_fs=[];
+                            outer_rs=[];
+                        end
+                        frontspar=[frontspar str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(1).value) inner_fs inner_fs  outer_fs outer_fs str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value)];
+                        rearspar=[rearspar str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value) inner_rs inner_rs outer_rs outer_rs str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(4).value)];
+                    else
+                        frontspar=[frontspar str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(1).value) str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value)];
+                        rearspar=[rearspar str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value) str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(4).value)];
+                    end
+                    is_fueled=[is_fueled factor*str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(5).value)];
+                    material{seg}= xml_aircraft.child(i).child(j).child(seg).child(wb).child(6).attribs.value;
+
+                        % saving extra properties related to layup.
+                        % Only executes if material is anisotropic
 %                             if strcmp(material{seg}, 'anisotropic')
 %                                ply_material{seg} = xml_aircraft.child(i).child(j).child(seg).child(wb).child(6).child(1).value;
 %                                layup_angles{seg} = str2double(strsplit(xml_aircraft.child(i).child(j).child(seg).child(wb).child(6).child(2).value,{',',' ',', '}));
 %                                layup_fractions{seg} = str2double(strsplit(xml_aircraft.child(i).child(j).child(seg).child(wb).child(6).child(3).value,{',',' ',', '}));
 %                             end
-                        end
-                    end
                 end
-                
+              
                 wings_structural_properties(j).frontspar=frontspar;
                 wings_structural_properties(j).rearspar=rearspar;
                 wings_structural_properties(j).is_fueled=is_fueled;
