@@ -123,7 +123,7 @@ classdef class_fuselagesegment
             switch nargin
                 case 1
                     r_min=min([obj.w_f/obj.w_r,obj.w_r/obj.w_f,obj.h_f/obj.h_r,obj.h_r/obj.h_f]);
-                    n=floor(sqrt(obj.l/r_min));
+                    n=max(2,floor(sqrt(obj.l/r_min)));
                     obj.n_circ=18;
                     isExternalFEM = 0;
                 case 2
