@@ -28,13 +28,15 @@ if strcmp(xmlstruct.child(1).tag,'DAEDALUS')
                     csPos=find(strcmp({xml_aircraft.child(i).child(j).child(seg).child(:).tag},'CONTROL_SURFACE'));
                     wbPos=find(strcmp({xml_aircraft.child(i).child(j).child(seg).child(:).tag},'WINGBOX'));
                     if ~isempty(csPos)
-                        wb=csPos;
-                        
-                        if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value)==0)
-                            factor=[factor 1];
-                        end
-                        if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value)==1)
-                            factor=[factor 1];
+                        for iCsPos=1:length(csPos)
+                            wb=csPos(iCsPos);
+
+                            if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(2).value)==0)
+                                factor=[factor 1];
+                            end
+                            if ~(str2double(xml_aircraft.child(i).child(j).child(seg).child(wb).child(3).value)==1)
+                                factor=[factor 1];
+                            end
                         end
                     end
                     wb=wbPos;
